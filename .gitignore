@@ -1,0 +1,8 @@
+# never publish: personal data, dev datasets, local overrides
+assets/*.pdf
+backups/
+*.local.js
+.env
+node_modules/
+Thumbs.db
+desktop.ini

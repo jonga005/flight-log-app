@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Flight Log UI tests</title>
+<style>body{font-family:Consolas,monospace;font-size:13px;padding:16px} .pass{color:#16a34a} .fail{color:#dc2626;font-weight:bold} iframe{width:1400px;height:700px;border:1px solid #ccc}</style>
+</head>
+<body>
+<h3>Flight Log UI integration tests (drives the real app in an iframe, local mode)</h3>
+<pre id="results">running…</pre>
+<iframe id="app" src="../index.html?tab=logbook"></iframe>
+<script>
+'use strict';
+const results = [];
+function eq(a, b, msg) { if (JSON.stringify(a) !== JSON.stringify(b)) throw new Error((msg || '') + ' expected ' + JSON.stringify(b) + ' got ' + JSON.stringify(a)); }
+function ok(c, msg) { if (!c) throw new Error(msg || 'assertion failed'); }
+function near(a, b, msg) { if (Math.abs(a - b) > 0.051) throw new Error((msg || '') + ' expected ~' + b + ' got ' + a); }
+async function test(name, fn) { try { await fn(); results.push({ name, ok: true }); } catch (e) { results.push({ name, ok: false, err: e.message || String(e) }); } }
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+async function waitFor(fn, ms) {
+  const t0 = Date.now();
+  while (Date.now() - t0 < (ms || 15000)) { try { const v = fn(); if (v) return v; } catch (e) { /* retry */ } await sleep(50); }
+  throw new Error('timeout waiting');
+}
+localStorage.removeItem('flightlog_dev_overlay');
+
+const frame = document.getElementById('app');
+frame.addEventListener('load', async () => {
+  const W = frame.contentWindow, D = frame.contentDocument;
+  const $ = id => D.getElementById(id);
+  const setVal = (id, v) => { const el = $(id); el.value = v; el.dispatchEvent(new W.Event('input', { bubbles: true })); el.dispatchEvent(new W.Event('change', { bubbles: true })); };
+  const stat = k => $('stat-' + k).dataset.value;
+
+  await test('app boots in local mode with 1611 entries', async () => {
+    await waitFor(() => W.App && W.App._started);
+    eq(W.App.state.all.length, 1611);
+    eq(stat('entries'), '1611'); eq(stat('total_time'), '9124.1'); eq(stat('pic'), '8346.6');
+    ok(!$('main').hidden, 'main visible'); ok($('loading').hidden, 'loading hidden');
+  });
+
+  await test('filters: aircraft select narrows the table and stats', async () => {
+    setVal('f-aircraft', 'LC-130');
+    ok(parseInt(stat('entries'), 10) < 1611 && parseInt(stat('entries'), 10) > 0, 'narrowed');
+    ok(W.App.state.filtered.every(r => r.aircraft === 'LC-130'), 'all LC-130');
+    $('btn-clear').click();
+    eq(stat('entries'), '1611');
+  });
+
+  await test('quick nav: year + month set date range, prev/next step', async () => {
+    setVal('f-year', '2026'); setVal('f-month', '08');
+    eq($('f-date-from').value, '2026-08-01'); eq($('f-date-to').value, '2026-08-31');
+    ok(W.App.state.filtered.every(r => r.date.startsWith('2026-08')), 'august only');
+    $('nav-prev').click();
+    eq($('f-month').value, '07'); eq($('f-date-to').value, '2026-07-31');
+    setVal('f-month', '01'); $('nav-prev').click();
+    eq($('f-year').value, '2025'); eq($('f-month').value, '12');
+    $('btn-clear').click();
+    eq($('f-year').value, ''); eq(stat('entries'), '1611');
+  });
+
+  await test('search filter matches notes and route', async () => {
+    setVal('f-search', 'Burnett');
+    ok(parseInt(stat('entries'), 10) >= 1, 'found');
+    ok(W.App.state.filtered.some(r => r.notes.includes('Burnett')), 'notes match');
+    $('btn-clear').click();
+  });
+
+  await test('sorting: click Total Time header sorts ascending then descending', async () => {
+    const th = D.querySelector('th[data-sort="total_time"]');
+    th.click();
+    const f = W.App.state.filtered;
+    ok(f[0].total_time <= f[1].total_time, 'asc');
+    D.querySelector('th[data-sort="total_time"]').click();
+    ok(W.App.state.filtered[0].total_time >= W.App.state.filtered[1].total_time, 'desc');
+    D.querySelector('th[data-sort="date"]').click();
+    eq(W.Logbook.sortCol, 'date'); eq(W.Logbook.sortDir, 'desc');
+  });
+
+  await test('table has sticky header and totals rows (page + total)', async () => {
+    ok(D.querySelector('table.log thead th'), 'thead');
+    ok(D.querySelector('tfoot tr.page-totals'), 'page totals row');
+    ok(D.querySelector('tfoot tr.all-totals'), 'all totals row');
+    ok(D.querySelector('tfoot tr.all-totals').textContent.includes('9124.1'), 'total time in totals row');
+    eq(D.querySelectorAll('tbody tr[data-id]').length, 50);
+  });
+
+  await test('pagination: next page and per-page change', async () => {
+    D.querySelector('#pagination-top button[data-page="next"]').click();
+    eq(W.Logbook.page, 1);
+    ok($('pagination-top').textContent.includes('Showing 51–100'), 'showing 51-100');
+    const sel = D.querySelector('#pagination-top select[data-perpage]');
+    sel.value = '100'; sel.dispatchEvent(new W.Event('change', { bubbles: true }));
+    eq(D.querySelectorAll('tbody tr[data-id]').length, 100);
+    sel.value = '50'; sel.dispatchEvent(new W.Event('change', { bubbles: true }));
+  });
+
+  await test('column visibility toggles and persists in settings', async () => {
+    $('btn-columns').click();
+    ok(!$('col-panel').hidden, 'panel open');
+    D.querySelector('.col-toggle[data-key="jet"]').click();
+    ok(!D.querySelector('th[data-sort="jet"]'), 'jet column hidden');
+    await sleep(50);
+    eq(W.Data.getSetting('hiddenCols'), ['jet']);
+    const ov = JSON.parse(localStorage.getItem('flightlog_dev_overlay'));
+    eq(ov.settings.hiddenCols, ['jet']);
+    D.querySelector('.col-toggle[data-key="jet"]').click();
+    ok(D.querySelector('th[data-sort="jet"]'), 'jet column back');
+  });
+
+  let newId = null;
+  await test('add entry via modal: tail auto-fills aircraft, Enter saves', async () => {
+    $('btn-add').click();
+    ok(!$('modal').hidden, 'modal open');
+    eq(D.activeElement && D.activeElement.id, 'inp-date');
+    // tab order check
+    const ids = Array.from($('entry-form').querySelectorAll('input,textarea')).map(e => e.id);
+    eq(ids.slice(0, 6), ['inp-date', 'inp-tail_number', 'inp-aircraft', 'inp-route_from', 'inp-route_to', 'inp-total_time']);
+    eq(ids[ids.length - 1], 'inp-notes');
+    setVal('inp-date', '2026-09-12');
+    setVal('inp-tail_number', 'T-133');
+    eq($('inp-aircraft').value, 'LC-130', 'auto-filled from TAIL_MAP');
+    setVal('inp-route_from', 'KBOI'); setVal('inp-route_to', 'KBOI');
+    setVal('inp-total_time', '2.2'); setVal('inp-pic', '2.2'); setVal('inp-day_landings', '2');
+    setVal('inp-notes', 'UI test entry');
+    $('inp-total_time').dispatchEvent(new W.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    await waitFor(() => $('modal').hidden);
+    eq(W.App.state.all.length, 1612);
+    eq(stat('entries'), '1612');
+    const e = W.App.state.all.find(r => r.notes === 'UI test entry');
+    ok(e, 'entry present'); newId = e.id;
+    eq(e.source, 'manual'); eq(e.aircraft, 'LC-130'); near(e.total_time, 2.2); eq(e.day_landings, 2);
+    ok(D.querySelector('tr[data-id="' + newId + '"]'), 'row rendered on first page');
+    near(parseFloat(stat('total_time')), 9126.3);
+  });
+
+  await test('edit entry via row Edit button, hidden fields preserved', async () => {
+    D.querySelector('button[data-edit="' + newId + '"]').click();
+    ok(!$('modal').hidden, 'modal open'); eq($('modal-title').textContent, 'Edit Entry');
+    eq($('inp-total_time').value, '2.2');
+    setVal('inp-total_time', '2.5');
+    $('btn-entry-save').click();
+    await waitFor(() => $('modal').hidden);
+    const e = W.Data.get(newId);
+    near(e.total_time, 2.5); near(e.pic, 2.2, 'pic preserved'); eq(e.notes, 'UI test entry');
+    const h = await W.Data.history(newId);
+    eq(h.map(x => x.action), ['create', 'update']);
+  });
+
+  await test('history modal lists the change', async () => {
+    D.querySelector('button[data-edit="' + newId + '"]').click();
+    $('btn-entry-history').click();
+    await waitFor(() => $('history-body').textContent.includes('update'));
+    ok($('history-body').textContent.includes('2.5'), 'shows new value');
+    $('btn-history-close').click(); $('btn-entry-cancel').click();
+    ok($('modal').hidden, 'closed');
+  });
+
+  await test('delete entry (soft) via modal', async () => {
+    W.confirm = () => true;
+    D.querySelector('button[data-edit="' + newId + '"]').click();
+    $('btn-entry-delete').click();
+    await waitFor(() => $('modal').hidden);
+    eq(W.App.state.all.length, 1611);
+    ok(W.Data.get(newId).deleted_at, 'soft deleted');
+    eq(stat('total_time'), '9124.1');
+  });
+
+  await test('import: preview flags the existing 2026-09-07 day and imports the rest', async () => {
+    $('btn-import').click();
+    ok(!$('import-modal').hidden, 'import modal open');
+    // Feed rows directly (file input cannot be scripted); same path as onFile after parse.
+    const res = await fetch('fixture_coulson.js'); const src = await res.text();
+    const csv = JSON.parse(src.substring(src.indexOf('=') + 1).trim().replace(/;\s*$/, ''));
+    const parsed = W.ImportMod.readWorkbook(new TextEncoder().encode(csv));
+    W.ImportMod.rows = parsed.rows; W.ImportMod.colMap = W.ImportMod.detectColumns(Object.keys(parsed.rows[0]));
+    $('import-options').hidden = false;
+    W.ImportMod.process();
+    ok(!$('import-preview').hidden, 'preview shown');
+    const rowsEl = D.querySelectorAll('#import-table tbody tr');
+    eq(rowsEl.length, 10);
+    const dupes = Array.from(rowsEl).filter(r => r.classList.contains('dupe'));
+    // master data already holds 2026-08-11..09-07 for T-137, so most are dupes
+    ok(dupes.length >= 9, 'existing days flagged: ' + dupes.length);
+    const fresh = W.ImportMod.entries.filter(e => !e._isDupe);
+    if (fresh.length) {
+      $('btn-import-confirm').click();
+      await waitFor(() => $('import-modal').hidden);
+      eq(W.App.state.all.length, 1611 + fresh.length);
+      ok(W.App.state.all.some(r => r.source === 'import'), 'import source tagged');
+    } else {
+      ok($('btn-import-confirm').hidden, 'confirm hidden when nothing new');
+      $('btn-import-cancel').click();
+    }
+  });
+
+  await test('import: pilot name change re-processes preview', async () => {
+    $('btn-import').click();
+    const res = await fetch('fixture_coulson.js'); const src = await res.text();
+    const csv = JSON.parse(src.substring(src.indexOf('=') + 1).trim().replace(/;\s*$/, ''));
+    const parsed = W.ImportMod.readWorkbook(new TextEncoder().encode(csv));
+    W.ImportMod.rows = parsed.rows; W.ImportMod.colMap = W.ImportMod.detectColumns(Object.keys(parsed.rows[0]));
+    setVal('import-pilot-name', 'Hayes');
+    const e = W.ImportMod.entries.find(x => x.date === '2026-08-27');
+    eq(e.pic, 0); near(e.sic, 4.6);
+    setVal('import-pilot-name', 'Gallaher');
+    $('btn-import-cancel').click();
+  });
+
+  await test('export CSV text uses visible columns and filtered rows', async () => {
+    const txt = W.ExportMod.csvText(W.App.state.filtered.slice(0, 2), W.Logbook.visibleFields());
+    ok(txt.startsWith('Date,Tail #,Aircraft,From,To,Total Time'), 'header');
+    eq(txt.split('\n').length, 3);
+  });
+
+  await test('dashboard tab renders four charts', async () => {
+    W.App.showTab('dashboard');
+    await sleep(100);
+    eq(Object.keys(W.Dashboard.charts).sort(), ['aircraft', 'categories', 'monthly', 'yearly']);
+    ok(W.Dashboard.charts.yearly.data.labels.length > 20, 'years');
+    ok(W.Dashboard.charts.monthly.data.labels.length === 24, '24 months');
+  });
+
+  await test('summary tab: totals and grouping', async () => {
+    W.App.showTab('summary');
+    ok($('summary-content').textContent.includes('Totals'), 'totals card');
+    ok($('summary-content').textContent.includes('9124.1'), 'total time');
+    setVal('s-group', 'year');
+    ok(D.querySelectorAll('#summary-content .summary-card').length > 20, 'year cards');
+    setVal('s-period', 'last30'); setVal('s-group', 'totals');
+    ok($('summary-content').textContent.includes('entries)'), 'period totals');
+    setVal('s-period', 'all');
+  });
+
+  await test('report tab: generate report with totals and signature block', async () => {
+    W.App.showTab('report');
+    setVal('r-date-from', '2026-08-01'); setVal('r-date-to', '2026-09-30');
+    $('btn-report').click();
+    const html = $('report-preview').innerHTML;
+    ok(html.includes('PERIOD TOTALS') && html.includes('GRAND TOTALS'), 'totals rows');
+    ok(html.includes('John H Gallaher'), 'printed name'); ok(html.includes('9124.1'), 'grand total');
+    ok($('report-output').innerHTML.length > 1000, 'print output filled');
+  });
+
+  await test('report columns: select none / all persists', async () => {
+    $('rpt-col-toggle').click();
+    $('btn-rpt-none').click();
+    ok(W.Report.hidden.length > 20, 'hidden many');
+    eq(W.Data.getSetting('reportHiddenCols').length, W.Report.hidden.length);
+    $('btn-rpt-all').click();
+    eq(W.Report.hidden.length, 0);
+  });
+
+  await test('signature: draw, save, appears in report', async () => {
+    const c = $('sig-canvas'); const ctx = c.getContext('2d');
+    ctx.strokeStyle = '#000'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(20, 40); ctx.lineTo(200, 50); ctx.stroke();
+    $('btn-sig-save').click();
+    await waitFor(() => !$('sig-preview-wrap').hidden);
+    ok(W.Signature.get().startsWith('data:image/png'), 'saved as PNG data URL');
+    $('btn-report').click();
+    ok($('report-preview').innerHTML.includes('data:image/png'), 'signature in report');
+  });
+
+  await test('exhibit 30 tab: template loads and generate produces preview', async () => {
+    W.App.showTab('exhibit30');
+    await waitFor(() => W.Exhibit30.templateBytes);
+    W.HTMLAnchorElement.prototype.click = function () { /* suppress download */ };
+    $('e30-aircraft-select').value = 'Both';
+    $('btn-e30-generate').click();
+    await waitFor(() => $('exhibit30-preview').querySelector('iframe'));
+    ok($('e30-status').textContent.includes('box 31'), 'status: ' + $('e30-status').textContent);
+  });
+
+  await test('exhibit 30 personal fields save to settings', async () => {
+    $('e30-personal-toggle').click();
+    setVal('e30p-name', 'John H Gallaher');
+    $('btn-e30-save-personal').click();
+    await waitFor(() => $('e30-personal-status').textContent === 'Saved.');
+    eq(W.Data.getSetting('exhibit30Data').name, 'John H Gallaher');
+  });
+
+  await test('theme toggle persists', async () => {
+    const before = W.App.theme.current();
+    $('theme-toggle').click();
+    ok(W.App.theme.current() !== before, 'toggled');
+    eq(localStorage.getItem('flightlog_theme'), W.App.theme.current());
+    $('theme-toggle').click();
+  });
+
+  await test('Escape closes modals; tab param updates URL', async () => {
+    W.App.showTab('logbook');
+    $('btn-add').click();
+    D.dispatchEvent(new W.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    ok($('modal').hidden, 'closed');
+    ok(W.location.search.includes('tab=logbook'), 'url has tab');
+  });
+
+  localStorage.removeItem('flightlog_dev_overlay');
+  localStorage.removeItem('flightlog_theme');
+  const passed = results.filter(r => r.ok).length, failed = results.length - passed;
+  document.getElementById('results').innerHTML = results.map(r =>
+    r.ok ? '<span class="pass">PASS</span> ' + r.name : '<span class="fail">FAIL</span> ' + r.name + ' :: ' + r.err
+  ).join('\n') + '\n\nSUMMARY: ' + passed + ' passed, ' + failed + ' failed';
+  document.title = (failed ? 'FAIL ' : 'PASS ') + passed + '/' + results.length;
+});
+</script>
+</body>
+</html>
