@@ -39,12 +39,40 @@ const NUM_FIELDS = FIELDS.filter(f => f.type === 'num');
 
 // Entry panel layout. The form no longer follows table column visibility:
 // these sections always show; every other number field sits behind
-// "More fields" unless the entry already has a value in it.
+// "More fields" unless the entry already has a value in it. The 'auto'
+// section is filled from aircraft type + role (see deriveFromType).
 const FORM_SECTIONS = [
-  { title: 'Time', keys: ['total_time', 'pic', 'sic', 'multi_engine', 'jet', 'turbo_prop', 'cross_country', 'over_12500', 'night'] },
-  { title: 'Type', keys: ['b737_total', 'b737_pic', 'c130_total', 'c130_pic'] },
+  { title: 'Time', keys: ['total_time', 'night'], role: true },
+  { title: 'Filled from type & role', keys: ['pic', 'sic', 'multi_engine', 'jet', 'turbo_prop', 'cross_country', 'over_12500', 'b737_total', 'b737_pic', 'c130_total', 'c130_pic', 'c130_sic'], auto: true },
   { title: 'Landings & ops', keys: ['day_landings', 'night_landings', 'drops', 'approaches', 'actual_inst', 'sim_inst'] }
 ];
+
+// Hours implied by aircraft type, total time and role, the same rules the
+// import has always used. Cross-country is not included: the import works it
+// out per leg, the entry form defaults it to the total.
+function deriveFromType(aircraft, t, isPIC, isSIC) {
+  const ac = String(aircraft || '').toUpperCase();
+  const isSingleEngine = ac.includes('C182') || ac.includes('C210') || ac.includes('PA32') || ac.includes('C172');
+  const isMulti = !isSingleEngine;
+  const isB737 = ac.includes('B733') || ac.includes('B737') || ac.includes('737');
+  const isBae146 = ac.includes('B462') || ac.includes('BAE') || ac.includes('RJ85') || ac.includes('146');
+  const isC130 = ac.includes('LC-130') || ac.includes('C-130') || ac.includes('L382') || ac.includes('C130');
+  const isCitation = ac.includes('CE-5') || ac.includes('C550') || ac.includes('C560') || ac.includes('CITATION');
+  const isP2V = ac.includes('P2V');
+  const isJet = isB737 || isBae146 || isCitation || ac.includes('G200') || ac.includes('CL-');
+  const isTurboProp = isC130;
+  const isOver12500 = isB737 || isBae146 || isC130 || isP2V || isCitation;
+  return {
+    single_engine: isSingleEngine ? t : 0, multi_engine: isMulti ? t : 0, jet: isJet ? t : 0, turbo_prop: isTurboProp ? t : 0,
+    over_12500: isOver12500 ? t : 0,
+    pic: isPIC ? t : 0, sic: isSIC ? t : 0,
+    b737_total: isB737 ? t : 0, b737_pic: (isB737 && isPIC) ? t : 0,
+    bae146_total: isBae146 ? t : 0, bae146_pic: (isBae146 && isPIC) ? t : 0,
+    c130_total: isC130 ? t : 0, c130_pic: (isC130 && isPIC) ? t : 0, c130_sic: (isC130 && isSIC) ? t : 0,
+    citation: isCitation ? t : 0,
+    p2_pic: (isP2V && isPIC) ? t : 0, p2_sic: (isP2V && isSIC) ? t : 0
+  };
+}
 
 // Column presets for the Log Book table: the keys listed are shown, every
 // other hideable column is hidden. 'current' is the default for a fresh setup.

@@ -76,22 +76,45 @@ frame.addEventListener('load', async () => {
     eq(W.Logbook.sortCol, 'date'); eq(W.Logbook.sortDir, 'desc');
   });
 
-  await test('table has sticky header and totals rows (page + total)', async () => {
+  await test('table: sticky header, month header rows with month totals, grand total', async () => {
     ok(D.querySelector('table.log thead th'), 'thead');
-    ok(D.querySelector('tfoot tr.page-totals'), 'page totals row');
-    ok(D.querySelector('tfoot tr.all-totals'), 'all totals row');
+    ok(!D.querySelector('tfoot tr.page-totals'), 'no page totals');
     ok(D.querySelector('tfoot tr.all-totals').textContent.includes('9124.1'), 'total time in totals row');
-    eq(D.querySelectorAll('tbody tr[data-id]').length, 50);
+    eq(D.querySelectorAll('tbody tr[data-id]').length, 200);
+    const m = D.querySelector('tbody tr.month-row');
+    ok(m && m.textContent.includes('September 2026'), 'first month header: ' + (m && m.textContent));
+    const sep = W.App.state.all.filter(r => r.date.startsWith('2026-09'));
+    ok(m.textContent.includes(sep.length + ' flight'), 'month flight count');
+    const tot = Math.round(sep.reduce((s, r) => s + r.total_time, 0) * 10) / 10;
+    ok(m.textContent.includes(W.fmtNum(tot)), 'month total time ' + tot);
+    D.querySelector('th[data-sort="total_time"]').click();
+    ok(!D.querySelector('tbody tr.month-row'), 'no month rows when sorted by another column');
+    D.querySelector('th[data-sort="date"]').click();
+    eq(W.Logbook.sortCol, 'date'); eq(W.Logbook.sortDir, 'desc');
   });
 
-  await test('pagination: next page and per-page change', async () => {
-    D.querySelector('#pagination-top button[data-page="next"]').click();
-    eq(W.Logbook.page, 1);
-    ok($('pagination-top').textContent.includes('Showing 51–100'), 'showing 51-100');
-    const sel = D.querySelector('#pagination-top select[data-perpage]');
-    sel.value = '100'; sel.dispatchEvent(new W.Event('change', { bubbles: true }));
-    eq(D.querySelectorAll('tbody tr[data-id]').length, 100);
-    sel.value = '50'; sel.dispatchEvent(new W.Event('change', { bubbles: true }));
+  await test('one list: scrolling loads more rows, Show all loads the rest', async () => {
+    const wrap = $('table-wrap');
+    wrap.scrollTop = wrap.scrollHeight;
+    wrap.dispatchEvent(new W.Event('scroll'));
+    eq(D.querySelectorAll('tbody tr[data-id]').length, 400);
+    ok($('table-status').textContent.includes('Showing 400 of 1,611'), $('table-status').textContent);
+    $('table-status').querySelector('[data-show-all]').click();
+    eq(D.querySelectorAll('tbody tr[data-id]').length, 1611);
+    ok(!$('table-status').querySelector('[data-show-all]'), 'button gone when all shown');
+    $('btn-clear').click();
+    eq(D.querySelectorAll('tbody tr[data-id]').length, 200, 'filter change resets to first chunk');
+  });
+
+  await test('filter bar: no Filter button; More filters reveals date range and tail', async () => {
+    ok(!$('btn-filter'), 'Filter button removed');
+    ok($('more-filters').hidden, 'hidden by default');
+    $('btn-more-filters').click();
+    ok(!$('more-filters').hidden, 'shown');
+    setVal('f-tail', 'T-133');
+    ok(W.App.state.filtered.length > 0 && W.App.state.filtered.every(r => r.tail_number === 'T-133'), 'tail filter');
+    ok($('stats').querySelector('.scope-what').textContent.includes('T-133'), 'scope names the tail');
+    $('btn-clear').click(); $('btn-more-filters').click();
   });
 
   await test('fresh setup uses the Current flying column preset; no Edit column', async () => {
@@ -141,8 +164,39 @@ frame.addEventListener('load', async () => {
     const e = W.App.state.all.find(r => r.notes === 'UI test entry');
     ok(e, 'entry present'); newId = e.id;
     eq(e.source, 'manual'); eq(e.aircraft, 'LC-130'); near(e.total_time, 2.2); eq(e.day_landings, 2);
+    near(e.c130_total, 2.2, 'auto c130 total'); near(e.c130_pic, 2.2, 'auto c130 pic'); near(e.turbo_prop, 2.2); near(e.multi_engine, 2.2);
+    near(e.over_12500, 2.2); near(e.cross_country, 2.2); eq(e.jet, 0); eq(e.b737_total, 0);
     ok(D.querySelector('tr[data-id="' + newId + '"]'), 'row rendered on first page');
     near(parseFloat(stat('total_time')), 9126.3);
+  });
+
+  await test('auto-fill: 737 PIC entry fills type fields, typed values are kept, Tab skips filled boxes', async () => {
+    $('btn-add').click();
+    setVal('inp-tail_number', 'T-137');
+    eq($('inp-aircraft').value.trim(), 'B733');
+    setVal('inp-total_time', '3.4');
+    ['pic', 'multi_engine', 'jet', 'cross_country', 'over_12500', 'b737_total', 'b737_pic'].forEach(k => eq($('inp-' + k).value, '3.4', k));
+    ['sic', 'turbo_prop', 'c130_total'].forEach(k => eq($('inp-' + k).value, '', k));
+    ok($('inp-jet').classList.contains('auto') && $('inp-jet').tabIndex === -1, 'jet shaded and skipped by Tab');
+    setVal('inp-cross_country', '2.1');
+    ok(!$('inp-cross_country').classList.contains('auto'), 'typed box no longer shaded');
+    setVal('inp-total_time', '3.6');
+    eq($('inp-cross_country').value, '2.1', 'typed XC kept'); eq($('inp-jet').value, '3.6', 'auto jet follows');
+    D.querySelector('#role-toggle button[data-role="sic"]').click();
+    eq($('inp-pic').value, ''); eq($('inp-sic').value, '3.6'); eq($('inp-b737_pic').value, '');
+    D.querySelector('#role-toggle button[data-role="pic"]').click();
+    eq($('inp-pic').value, '3.6');
+    $('btn-entry-cancel').click();
+    eq(W.App.state.all.length, 1612, 'nothing saved');
+  });
+
+  await test('auto-fill on edit: consistent fields follow, odd historical values are left alone', async () => {
+    const odd = W.App.state.all.find(r => r.aircraft.trim() === 'B733' && r.total_time > 1 && r.cross_country > 0 && Math.abs(r.cross_country - r.total_time) > 0.05);
+    ok(odd, 'found a 737 entry with partial XC');
+    W.Logbook.openEdit(odd.id);
+    ok(!$('inp-cross_country').classList.contains('auto'), 'partial XC is not auto');
+    eq($('inp-cross_country').value, String(odd.cross_country));
+    W.Logbook.closePanel();
   });
 
   await test('edit entry with one click on the row, hidden fields preserved', async () => {
@@ -155,7 +209,8 @@ frame.addEventListener('load', async () => {
     $('btn-entry-save').click();
     await waitFor(() => $('modal').hidden);
     const e = W.Data.get(newId);
-    near(e.total_time, 2.5); near(e.pic, 2.2, 'pic preserved'); eq(e.notes, 'UI test entry');
+    near(e.total_time, 2.5); near(e.pic, 2.5, 'pic followed total (it matched before)'); near(e.c130_total, 2.5); eq(e.notes, 'UI test entry');
+    eq(e.day_landings, 2, 'other fields preserved');
     const h = await W.Data.history(newId);
     eq(h.map(x => x.action), ['create', 'update']);
   });
@@ -186,7 +241,7 @@ frame.addEventListener('load', async () => {
     D.querySelector('tr[data-id="' + newId + '"]').click();
     $('btn-entry-dup').click();
     eq($('modal-title').textContent, 'Add Entry');
-    eq($('inp-total_time').value, '2.5'); eq($('inp-pic').value, '2.2'); eq($('inp-notes').value, 'UI test entry');
+    eq($('inp-total_time').value, '2.5'); eq($('inp-pic').value, '2.5'); eq($('inp-notes').value, 'UI test entry');
     ok($('btn-entry-delete').hidden, 'no delete on a new entry');
     $('btn-entry-cancel').click();
   });

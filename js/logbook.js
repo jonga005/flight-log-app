@@ -4,8 +4,8 @@
 const Logbook = {
   sortCol: 'date',
   sortDir: 'desc',
-  page: 0,
-  perPage: 50,
+  CHUNK: 200,          // rows added each time the list scrolls near the bottom
+  shown: 200,
   hiddenCols: [],
   editingId: null,
   seed: null,          // values a new entry starts from (Next leg / Duplicate)
@@ -19,7 +19,6 @@ const Logbook = {
   init() {
     const savedCols = Data.getSetting('hiddenCols', null);
     this.hiddenCols = savedCols ? savedCols.slice() : presetHiddenCols('current');
-    this.perPage = Data.getSetting('perPage', 50);
     this.userTailMap = Object.assign({}, Data.getSetting('tail_map', {}));
     Object.assign(TAIL_MAP, this.userTailMap);
 
@@ -27,7 +26,7 @@ const Logbook = {
     this.renderColPanel();
 
     // filters
-    this.$('btn-filter').addEventListener('click', () => this.applyFilters());
+    this.$('btn-more-filters').addEventListener('click', () => { const m = this.$('more-filters'); m.hidden = !m.hidden; });
     this.$('btn-clear').addEventListener('click', () => this.clearFilters());
     ['f-aircraft', 'f-tail', 'f-category'].forEach(id => this.$(id).addEventListener('change', () => this.applyFilters()));
     ['f-search', 'f-date-from', 'f-date-to'].forEach(id => {
@@ -70,26 +69,13 @@ const Logbook = {
       const tr = e.target.closest('tr[data-id]');
       if (tr) this.openEdit(tr.dataset.id);
     });
-    ['pagination-top', 'pagination-bottom'].forEach(id => {
-      this.$(id).addEventListener('click', e => {
-        const b = e.target.closest('button[data-page]');
-        if (!b || b.disabled) return;
-        const total = this.totalPages();
-        const a = b.dataset.page;
-        if (a === 'first') this.page = 0;
-        else if (a === 'prev') this.page = Math.max(0, this.page - 1);
-        else if (a === 'next') this.page = Math.min(total - 1, this.page + 1);
-        else if (a === 'last') this.page = Math.max(0, total - 1);
-        this.renderTable();
-      });
-      this.$(id).addEventListener('change', e => {
-        if (e.target.matches('select[data-perpage]')) {
-          this.perPage = e.target.value === 'all' ? 'all' : parseInt(e.target.value, 10);
-          this.page = 0;
-          Data.setSetting('perPage', this.perPage);
-          this.renderTable();
-        }
-      });
+    // one continuous list: more rows load as you scroll near the bottom
+    wrap.addEventListener('scroll', () => {
+      if (this.shown >= App.state.filtered.length) return;
+      if (wrap.scrollTop + wrap.clientHeight > wrap.scrollHeight - 400) this.showMore();
+    });
+    this.$('table-status').addEventListener('click', e => {
+      if (e.target.closest('[data-show-all]')) { this.shown = App.state.filtered.length; this.renderTable(); }
     });
 
     // entry panel
@@ -110,8 +96,12 @@ const Logbook = {
       if (e.key === 'Enter' && e.target.tagName !== 'TEXTAREA') { e.preventDefault(); this.saveEntry(); }
     });
     this.$('entry-form').addEventListener('input', e => {
-      if (e.target.id === 'inp-tail_number') this.onTailInput();
+      this.onFormInput(e);
       this.clearWarnings();
+    });
+    this.$('entry-form').addEventListener('click', e => {
+      const b = e.target.closest('button[data-role]');
+      if (b) this.setRole(b.dataset.role);
     });
     // Esc closes the panel, unless a dialog (history, import) is open on top of it.
     // Capture phase so we see the overlays before App's handler hides them.
@@ -161,8 +151,8 @@ const Logbook = {
       sel.innerHTML = '<option value="">' + allLabel + '</option>' + values.map(v => '<option value="' + escapeHtml(v) + '">' + escapeHtml(v) + '</option>').join('');
       if (values.indexOf(cur) >= 0) sel.value = cur;
     };
-    fill('f-aircraft', [...new Set(all.map(r => r.aircraft).filter(Boolean))].sort(), 'All');
-    fill('f-tail', [...new Set(all.map(r => r.tail_number).filter(Boolean))].sort(), 'All');
+    fill('f-aircraft', [...new Set(all.map(r => r.aircraft).filter(Boolean))].sort(), 'All aircraft');
+    fill('f-tail', [...new Set(all.map(r => r.tail_number).filter(Boolean))].sort(), 'All tails');
     const years = [...new Set(all.map(r => r.date.substring(0, 4)).filter(y => /^\d{4}$/.test(y)))].sort().reverse();
     fill('f-year', years, 'All years');
   },
@@ -231,7 +221,7 @@ const Logbook = {
       if (cat && !r[cat]) return false;
       return true;
     });
-    this.page = 0;
+    this.shown = this.CHUNK;
     this.sortData();
     this.render();
     if (App.state.tab === 'dashboard') Dashboard.render();
@@ -267,21 +257,36 @@ const Logbook = {
     this.renderTable();
   },
 
-  totalPages() {
-    const n = App.state.filtered.length;
-    if (this.perPage === 'all') return n ? 1 : 0;
-    return Math.ceil(n / this.perPage);
+  showMore() {
+    const wrap = this.$('table-wrap'), top = wrap.scrollTop;
+    this.shown += this.CHUNK;
+    this.renderTable();
+    wrap.scrollTop = top;
   },
 
   renderTable() {
     const data = App.state.filtered;
     const visCols = this.visibleFields().filter(f => f.key !== 'notes');
-    const per = this.perPage === 'all' ? Math.max(1, data.length) : this.perPage;
-    const totalPages = this.totalPages();
-    if (this.page > totalPages - 1) this.page = Math.max(0, totalPages - 1);
-    const start = this.page * per;
-    const end = Math.min(start + per, data.length);
-    const rows = data.slice(start, end);
+    const end = Math.min(this.shown, data.length);
+    const rows = data.slice(0, end);
+    const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+
+    // Month header rows with that month's totals, only when sorted by date.
+    const byMonth = this.sortCol === 'date';
+    const monthSets = {};
+    if (byMonth) data.forEach(r => { const k = r.date.substring(0, 7); (monthSets[k] = monthSets[k] || []).push(r); });
+    let lead = 0; // text columns before the first number column; the month label spans them
+    while (lead < visCols.length && visCols[lead].type !== 'num') lead++;
+    const monthRow = key => {
+      const set = monthSets[key] || [];
+      const label = /^\d{4}-\d{2}$/.test(key) ? MONTHS[parseInt(key.substring(5), 10) - 1] + ' ' + key.substring(0, 4) : key;
+      let h = '<tr class="month-row"><td></td><td colspan="' + lead + '">' + escapeHtml(label) + ' <span class="muted">· ' + set.length + (set.length === 1 ? ' flight' : ' flights') + '</span></td>';
+      visCols.slice(lead).forEach(f => {
+        const s = f.type === 'num' ? sumKey(set, f.key) : 0;
+        h += '<td class="num">' + (s ? fmtNum(Math.round(s * 10) / 10) : '') + '</td>';
+      });
+      return h + '<td></td></tr>';
+    };
 
     let html = '<table class="log"><thead><tr><th style="width:36px">#</th>';
     visCols.forEach(f => {
@@ -290,8 +295,11 @@ const Logbook = {
     });
     html += '<th data-sort="notes">Notes</th></tr></thead><tbody>';
 
+    let lastMonth = null;
     rows.forEach((r, i) => {
-      html += '<tr data-id="' + escapeHtml(r.id) + '"' + (r.id === this.editingId ? ' class="sel"' : '') + ' title="Click to open"><td class="num muted">' + (start + i + 1) + '</td>';
+      const mk = r.date.substring(0, 7);
+      if (byMonth && mk !== lastMonth) { html += monthRow(mk); lastMonth = mk; }
+      html += '<tr data-id="' + escapeHtml(r.id) + '"' + (r.id === this.editingId ? ' class="sel"' : '') + ' title="Click to open"><td class="num muted">' + (i + 1) + '</td>';
       visCols.forEach(f => {
         if (f.type === 'num') {
           const v = r[f.key];
@@ -306,7 +314,7 @@ const Logbook = {
     });
     html += '</tbody>';
 
-    // totals rows (page and whole filtered set), like the bottom of a paper log page
+    // grand total of the filtered set, like the bottom of a paper log page
     const totalsRow = (label, set, cls) => {
       let h = '<tr class="' + cls + '"><td class="label" colspan="1">' + label + '</td>';
       visCols.forEach(f => {
@@ -319,24 +327,12 @@ const Logbook = {
       });
       return h + '<td></td></tr>';
     };
-    html += '<tfoot>';
-    if (this.perPage !== 'all' && data.length > per) html += totalsRow('Page', rows, 'page-totals');
-    html += totalsRow('Total', data, 'all-totals');
-    html += '</tfoot></table>';
+    html += '<tfoot>' + totalsRow('Total', data, 'all-totals') + '</tfoot></table>';
     this.$('table-wrap').innerHTML = html;
 
-    const opt = v => '<option value="' + v + '"' + (String(this.perPage) === String(v) ? ' selected' : '') + '>' + v + '</option>';
-    const pag = '<span>Showing ' + (data.length ? start + 1 : 0) + '–' + end + ' of <b>' + data.length + '</b> entries</span>' +
-      '<div class="pager">' +
-      '<label class="small">Per page <select data-perpage>' + opt(50) + opt(100) + opt(200) + opt('all') + '</select></label>' +
-      '<button class="btn btn-sm btn-secondary" data-page="first"' + (this.page === 0 ? ' disabled' : '') + '>&#10094;&#10094;</button>' +
-      '<button class="btn btn-sm btn-secondary" data-page="prev"' + (this.page === 0 ? ' disabled' : '') + '>&#10094;</button>' +
-      '<span>Page ' + (totalPages ? this.page + 1 : 0) + ' of ' + totalPages + '</span>' +
-      '<button class="btn btn-sm btn-secondary" data-page="next"' + (this.page >= totalPages - 1 ? ' disabled' : '') + '>&#10095;</button>' +
-      '<button class="btn btn-sm btn-secondary" data-page="last"' + (this.page >= totalPages - 1 ? ' disabled' : '') + '>&#10095;&#10095;</button>' +
-      '</div>';
-    this.$('pagination-top').innerHTML = pag;
-    this.$('pagination-bottom').innerHTML = pag;
+    this.$('table-status').innerHTML = '<span>Showing ' + end.toLocaleString() + ' of <b>' + data.length.toLocaleString() + '</b> entries' +
+      (end < data.length ? ' · scroll for more</span><button class="btn btn-sm btn-ghost" data-show-all>Show all</button>' : '</span>') +
+      (byMonth ? '' : '<span class="small muted">Month totals show when sorted by date</span>');
   },
 
   // Plain-words description of what the Log Book filters currently select.
@@ -439,13 +435,90 @@ const Logbook = {
     flight += '<div class="form-group"><label for="inp-route_to">To</label><input type="text" id="inp-route_to" value="' + val('route_to') + '"></div>';
     let html = section('Flight', flight);
     FORM_SECTIONS.forEach(s => {
-      html += section(s.title, s.keys.map(k => numInput(NUM_FIELDS.find(f => f.key === k))).join(''));
+      let inner = s.keys.map(k => numInput(NUM_FIELDS.find(f => f.key === k))).join('');
+      if (s.role) {
+        inner = inner.replace('</div>', '</div>' + // role toggle right after Total Time
+          '<div class="form-group span2"><span class="label">Role</span><div class="role-toggle" id="role-toggle">' +
+          ['pic', 'sic', 'none'].map(r => '<button type="button" data-role="' + r + '">' + (r === 'none' ? 'Neither' : r.toUpperCase()) + '</button>').join('') +
+          '</div></div>');
+      }
+      const title = s.auto ? s.title + ' <span class="hint">shaded = filled for you; type in a box to set it yourself</span>' : s.title;
+      html += section(title, inner);
     });
     const extra = this.extraFields(values);
     if (extra.length) html += section(this.showAllFields ? 'More fields' : 'Other fields with values', extra.map(numInput).join(''));
     html += '<div class="form-section"><div class="form-group"><label for="inp-notes">Notes</label><textarea id="inp-notes">' + val('notes') + '</textarea></div></div>';
     this.$('entry-form').innerHTML = html;
     this.$('btn-entry-allfields').textContent = this.showAllFields ? 'Fewer fields' : 'More fields';
+    this.initAuto(values);
+    this.clearWarnings();
+  },
+
+  // ---- auto-fill from aircraft type + role --------------------------------
+  // A field is "auto" while its value is what the rules would give (or it is
+  // empty on a new entry). Auto fields follow Total / Aircraft / Role as they
+  // change; typing in one makes it the user's own and it is never touched again.
+  AUTO_KEYS: ['single_engine', 'multi_engine', 'jet', 'turbo_prop', 'over_12500', 'pic', 'sic', 'cross_country',
+    'b737_total', 'b737_pic', 'bae146_total', 'bae146_pic', 'c130_total', 'c130_pic', 'c130_sic', 'citation', 'p2_pic', 'p2_sic'],
+
+  expectedAuto(aircraft, t, role) {
+    t = t || 0;
+    const d = String(aircraft || '').trim()
+      ? deriveFromType(aircraft, t, role === 'pic', role === 'sic')
+      : { pic: role === 'pic' ? t : 0, sic: role === 'sic' ? t : 0 }; // unknown type: only the role fields
+    const out = {};
+    this.AUTO_KEYS.forEach(k => { out[k] = d[k] || 0; });
+    out.cross_country = t;
+    return out;
+  },
+
+  initAuto(values) {
+    const isNew = !this.editingId;
+    if (values.sic && !values.pic) this.role = 'sic';
+    else if (values.pic || isNew || !values.total_time) this.role = 'pic';
+    else this.role = 'none';
+    const exp = this.expectedAuto(values.aircraft, values.total_time, this.role);
+    this.autoKeys = new Set(this.AUTO_KEYS.filter(k => {
+      const v = values[k] || 0;
+      return (isNew && !v) || Math.abs(v - exp[k]) < 0.001; // exact match only, so stored odd values are never rewritten
+    }));
+    this.applyAuto();
+  },
+
+  readAutoInputs() {
+    const t = parseFloat(this.$('inp-total_time').value) || 0;
+    return this.expectedAuto(this.$('inp-aircraft').value, t, this.role);
+  },
+
+  applyAuto() {
+    const exp = this.readAutoInputs();
+    this.$('role-toggle').querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset.role === this.role));
+    this.AUTO_KEYS.forEach(k => {
+      const el = this.$('inp-' + k);
+      if (!el) return;
+      const auto = this.autoKeys.has(k);
+      if (auto) el.value = exp[k] ? String(exp[k]) : '';
+      el.classList.toggle('auto', auto);
+      el.tabIndex = auto ? -1 : 0; // Tab skips filled boxes: Total -> Night -> landings
+    });
+  },
+
+  onFormInput(e) {
+    const id = e.target.id || '';
+    const key = id.replace(/^inp-/, '');
+    if (this.AUTO_KEYS.indexOf(key) >= 0) {
+      this.autoKeys.delete(key);
+      e.target.classList.remove('auto');
+      e.target.tabIndex = 0;
+      return;
+    }
+    if (id === 'inp-tail_number') this.onTailInput();
+    if (id === 'inp-tail_number' || id === 'inp-aircraft' || id === 'inp-total_time') this.applyAuto();
+  },
+
+  setRole(role) {
+    this.role = role;
+    this.applyAuto();
     this.clearWarnings();
   },
 
@@ -568,6 +641,9 @@ const Logbook = {
     } else {
       r = Object.assign(normalizeFields(this.seed || {}), form); // a duplicate keeps fields not shown in the form
     }
+    // auto fields with no box on screen (e.g. C130 SIC, BAe146) still follow the rules
+    const exp = this.readAutoInputs();
+    this.autoKeys.forEach(k => { if (!this.$('inp-' + k)) r[k] = exp[k]; });
     if (!this.warned) {
       const warnings = this.checkEntry(r);
       if (warnings.length) { this.showWarnings(warnings); return; }

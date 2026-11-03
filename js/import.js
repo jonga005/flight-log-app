@@ -184,33 +184,12 @@ const ImportMod = {
       const tasks = [...new Set(legs.map(l => String(l[colMap.task] || '').trim()).filter(Boolean))];
       const notes = tasks.join('; ');
 
-      const ac = aircraft.toUpperCase();
-      const isSingleEngine = ac.includes('C182') || ac.includes('C210') || ac.includes('PA32') || ac.includes('C172');
-      const isMulti = !isSingleEngine;
-      const isB737 = ac.includes('B733') || ac.includes('B737') || ac.includes('737');
-      const isBae146 = ac.includes('B462') || ac.includes('BAE') || ac.includes('RJ85') || ac.includes('146');
-      const isC130 = ac.includes('LC-130') || ac.includes('C-130') || ac.includes('L382') || ac.includes('C130');
-      const isCitation = ac.includes('CE-5') || ac.includes('C550') || ac.includes('C560') || ac.includes('CITATION');
-      const isP2V = ac.includes('P2V');
-      const isJet = isB737 || isBae146 || isCitation || ac.includes('G200') || ac.includes('CL-');
-      const isTurboProp = isC130;
-      const isOver12500 = isB737 || isBae146 || isC130 || isP2V || isCitation;
-
-      out.push({
+      out.push(Object.assign({
         date: dateStr, tail_number: tailNum, aircraft, route_from: routeFrom, route_to: routeTo, total_time: t,
-        single_engine: isSingleEngine ? t : 0, multi_engine: isMulti ? t : 0, jet: isJet ? t : 0, turbo_prop: isTurboProp ? t : 0,
-        over_12500: isOver12500 ? t : 0,
         actual_inst: 0, sim_inst: 0, approaches: 0,
         night: 0, night_landings: 0, day_landings: legs.length,
-        cross_country: xcTime,
-        pic: isPIC ? t : 0, sic: isSIC ? t : 0,
-        b737_total: isB737 ? t : 0, b737_pic: (isB737 && isPIC) ? t : 0,
-        bae146_total: isBae146 ? t : 0, bae146_pic: (isBae146 && isPIC) ? t : 0,
-        c130_total: isC130 ? t : 0, c130_pic: (isC130 && isPIC) ? t : 0, c130_sic: (isC130 && isSIC) ? t : 0,
-        citation: isCitation ? t : 0,
-        p2_pic: (isP2V && isPIC) ? t : 0, p2_sic: (isP2V && isSIC) ? t : 0,
-        drops: totalDrops, notes
-      });
+        cross_country: xcTime
+      }, deriveFromType(aircraft, t, isPIC, isSIC), { drops: totalDrops, notes }));
     });
     return out;
   },

@@ -58,28 +58,20 @@
 
       <div class="toolbar">
         <div class="filter-row">
-          <div class="filter-group nav-group">
-            <label>Quick nav</label>
-            <div class="inline">
-              <button class="btn btn-secondary btn-sm" id="nav-prev" title="Previous period">&#9664;</button>
-              <select id="f-year" title="Year"><option value="">All years</option></select>
-              <select id="f-month" title="Month">
-                <option value="">All months</option>
-                <option value="01">Jan</option><option value="02">Feb</option><option value="03">Mar</option>
-                <option value="04">Apr</option><option value="05">May</option><option value="06">Jun</option>
-                <option value="07">Jul</option><option value="08">Aug</option><option value="09">Sep</option>
-                <option value="10">Oct</option><option value="11">Nov</option><option value="12">Dec</option>
-              </select>
-              <button class="btn btn-secondary btn-sm" id="nav-next" title="Next period">&#9654;</button>
-            </div>
+          <div class="inline nav-group" title="Step through years, or pick a month">
+            <button class="btn btn-secondary btn-sm" id="nav-prev" title="Previous period">&#9664;</button>
+            <select id="f-year" title="Year"><option value="">All years</option></select>
+            <select id="f-month" title="Month">
+              <option value="">All months</option>
+              <option value="01">Jan</option><option value="02">Feb</option><option value="03">Mar</option>
+              <option value="04">Apr</option><option value="05">May</option><option value="06">Jun</option>
+              <option value="07">Jul</option><option value="08">Aug</option><option value="09">Sep</option>
+              <option value="10">Oct</option><option value="11">Nov</option><option value="12">Dec</option>
+            </select>
+            <button class="btn btn-secondary btn-sm" id="nav-next" title="Next period">&#9654;</button>
           </div>
-          <div class="filter-group"><label>Date from</label><input type="date" id="f-date-from"></div>
-          <div class="filter-group"><label>Date to</label><input type="date" id="f-date-to"></div>
-          <div class="filter-group"><label>Aircraft</label><select id="f-aircraft"><option value="">All</option></select></div>
-          <div class="filter-group"><label>Tail #</label><select id="f-tail"><option value="">All</option></select></div>
-          <div class="filter-group"><label>Search (route / notes / tail)</label><input type="search" id="f-search" placeholder="e.g. PANC"></div>
-          <div class="filter-group"><label>Category</label>
-            <select id="f-category">
+          <select id="f-aircraft" title="Aircraft"><option value="">All aircraft</option></select>
+          <select id="f-category" title="Category">
               <option value="">All flights</option>
               <option value="pic">PIC only</option>
               <option value="sic">SIC only</option>
@@ -90,26 +82,28 @@
               <option value="multi_engine">Multi engine</option>
               <option value="jet">Jet</option>
               <option value="turbo_prop">Turbo prop</option>
-            </select>
-          </div>
-          <div class="filter-group btn-group-v">
-            <button class="btn btn-primary" id="btn-filter">Filter</button>
-            <button class="btn btn-secondary" id="btn-clear">Clear</button>
-          </div>
+          </select>
+          <input type="search" id="f-search" placeholder="Search tail, route, notes" title="Matches tail, aircraft, route and notes">
+          <button class="btn btn-ghost btn-sm" id="btn-more-filters" title="Date range and tail number">More filters &#9662;</button>
+          <button class="btn btn-secondary btn-sm" id="btn-clear">Clear</button>
           <div class="spacer"></div>
-          <div class="filter-group btn-group-h">
-            <button class="btn btn-green" id="btn-add">+ Add Entry</button>
-            <button class="btn btn-primary" id="btn-import">Import</button>
-            <div class="dropdown">
-              <button class="btn btn-secondary" id="btn-export">Export &#9662;</button>
-              <div class="dropdown-menu" id="export-menu" hidden>
-                <button id="btn-export-csv">CSV (visible columns, filtered rows)</button>
-                <button id="btn-export-json">JSON (full logbook)</button>
-                <button id="btn-export-xlsx">XLSX (full logbook)</button>
-              </div>
+          <button class="btn btn-green" id="btn-add">+ Add Entry</button>
+          <div class="dropdown">
+            <button class="btn btn-secondary" id="btn-export" title="Import, export and columns">&#8943;</button>
+            <div class="dropdown-menu" id="export-menu" hidden>
+              <button id="btn-import">Import Coulson logbook report…</button>
+              <button id="btn-columns">Show / hide columns…</button>
+              <div class="menu-sep"></div>
+              <button id="btn-export-csv">Export CSV (visible columns, filtered rows)</button>
+              <button id="btn-export-json">Export JSON (full logbook)</button>
+              <button id="btn-export-xlsx">Export XLSX (full logbook)</button>
             </div>
-            <button class="btn btn-secondary" id="btn-columns">Columns</button>
           </div>
+        </div>
+        <div class="filter-row more-filters" id="more-filters" hidden>
+          <label class="inline small muted">From <input type="date" id="f-date-from"></label>
+          <label class="inline small muted">To <input type="date" id="f-date-to"></label>
+          <label class="inline small muted">Tail # <select id="f-tail"><option value="">All tails</option></select></label>
         </div>
       </div>
 
@@ -126,9 +120,8 @@
 
       <div class="lb-body">
         <div class="lb-main">
-          <div class="pagination" id="pagination-top"></div>
+          <div class="pagination" id="table-status"></div>
           <div class="table-wrap" id="table-wrap"></div>
-          <div class="pagination" id="pagination-bottom"></div>
         </div>
 
         <!-- Entry side panel (add / edit). Kept id="modal" so App.openModal/closeModal work. -->

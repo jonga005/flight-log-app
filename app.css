@@ -106,10 +106,16 @@ main { display: flex; flex-direction: column; flex: 1; min-height: 0; }
   padding: 5px 8px; background: var(--surface2); border: 1px solid var(--border); border-radius: 6px; color: var(--text); font-size: 0.85rem; min-width: 0;
 }
 .filter-group.btn-group-h { flex-direction: row; align-items: flex-end; gap: 6px; }
+.toolbar > .filter-row { align-items: center; }
+.toolbar select, .toolbar input { padding: 5px 8px; background: var(--surface2); border: 1px solid var(--border); border-radius: 6px; color: var(--text); font-size: 0.85rem; min-width: 0; }
+.toolbar select:focus, .toolbar input:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+.toolbar #f-aircraft, .toolbar #f-category { max-width: 150px; }
+.more-filters { margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--border); }
+.menu-sep { height: 1px; background: var(--border); margin: 4px 6px; }
 .filter-group input[type="date"] { width: 150px; }
 .filter-group select { min-width: 110px; }
 #f-search { width: 170px; }
-#f-year { width: 100px; } #f-month { width: 90px; }
+#f-year { width: 105px; } #f-month { width: 115px; }
 .filter-group input:focus, .filter-group select:focus, .form-group input:focus, .form-group select:focus, .form-group textarea:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
 
 .dropdown { position: relative; }
@@ -136,6 +142,13 @@ main { display: flex; flex-direction: column; flex: 1; min-height: 0; }
 .entry-form .form-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px 8px; }
 .entry-form input { width: 100%; }
 .entry-form textarea { width: 100%; min-height: 56px; }
+.entry-form .form-group > .label { font-size: 0.72rem; color: var(--text2); }
+.entry-form .form-section-title .hint { text-transform: none; letter-spacing: 0; margin-left: 6px; }
+.entry-form input.auto { background: rgba(37,99,235,0.08); border-color: transparent; color: var(--accent2); }
+.role-toggle { display: flex; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+.role-toggle button { flex: 1; padding: 5px 0; border: none; background: var(--surface2); color: var(--text2); cursor: pointer; font-size: 0.8rem; }
+.role-toggle button + button { border-left: 1px solid var(--border); }
+.role-toggle button.on { background: var(--accent); color: #fff; font-weight: 600; }
 .entry-warn { background: rgba(217,119,6,0.12); border: 1px solid var(--orange); border-radius: 6px; padding: 8px 10px; font-size: 0.8rem; }
 .entry-warn ul { margin: 4px 0 4px 18px; }
 .panel-actions { display: flex; gap: 6px; align-items: center; margin-top: auto; padding-top: 6px; border-top: 1px solid var(--border); }
@@ -152,6 +165,8 @@ table.log th.sorted-desc::after { content: " \25BC"; color: var(--accent2); font
 table.log td { padding: 4px 8px; border-bottom: 1px solid var(--border); white-space: nowrap; }
 table.log tbody tr:hover td { background: var(--row-hover); }
 table.log tbody tr { cursor: pointer; }
+table.log tbody tr.month-row { cursor: default; }
+table.log tbody tr.month-row td, table.log tbody tr.month-row:hover td { background: var(--surface2); font-weight: 600; font-variant-numeric: tabular-nums; border-bottom: 1px solid var(--border); padding-top: 6px; }
 table.log tbody tr.sel td { background: rgba(37,99,235,0.16); }
 table.log tbody tr.sel td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
 /* pin # and Date while scrolling sideways */
