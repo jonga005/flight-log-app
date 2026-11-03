@@ -8,6 +8,8 @@ const Logbook = {
   perPage: 50,
   hiddenCols: [],
   editingId: null,
+  seed: null,          // values a new entry starts from (Next leg / Duplicate)
+  warned: false,       // save checks shown once; the next Save goes through
   showAllFields: false,
   userTailMap: {},
 
@@ -15,7 +17,8 @@ const Logbook = {
 
   // ---- init ------------------------------------------------------------
   init() {
-    this.hiddenCols = Data.getSetting('hiddenCols', []).slice();
+    const savedCols = Data.getSetting('hiddenCols', null);
+    this.hiddenCols = savedCols ? savedCols.slice() : presetHiddenCols('current');
     this.perPage = Data.getSetting('perPage', 50);
     this.userTailMap = Object.assign({}, Data.getSetting('tail_map', {}));
     Object.assign(TAIL_MAP, this.userTailMap);
@@ -54,16 +57,16 @@ const Logbook = {
       const t = e.target.closest('.col-toggle');
       if (t) this.toggleCol(t.dataset.key);
     });
+    this.$('col-presets').addEventListener('click', e => {
+      const b = e.target.closest('button[data-preset]');
+      if (b) this.applyPreset(b.dataset.preset);
+    });
 
-    // table interactions (delegated)
+    // table interactions (delegated): one click on a row opens it in the panel
     const wrap = this.$('table-wrap');
     wrap.addEventListener('click', e => {
       const th = e.target.closest('th[data-sort]');
       if (th) { this.setSort(th.dataset.sort); return; }
-      const btn = e.target.closest('button[data-edit]');
-      if (btn) { this.openEdit(btn.dataset.edit); }
-    });
-    wrap.addEventListener('dblclick', e => {
       const tr = e.target.closest('tr[data-id]');
       if (tr) this.openEdit(tr.dataset.id);
     });
@@ -89,9 +92,12 @@ const Logbook = {
       });
     });
 
-    // entry modal
+    // entry panel
     this.$('btn-entry-save').addEventListener('click', () => this.saveEntry());
-    this.$('btn-entry-cancel').addEventListener('click', () => App.closeModal('modal'));
+    this.$('btn-entry-cancel').addEventListener('click', () => this.closePanel());
+    this.$('btn-entry-close').addEventListener('click', () => this.closePanel());
+    this.$('btn-entry-nextleg').addEventListener('click', () => this.nextLeg());
+    this.$('btn-entry-dup').addEventListener('click', () => this.duplicate());
     this.$('btn-entry-delete').addEventListener('click', () => this.deleteEntry());
     this.$('btn-entry-history').addEventListener('click', () => this.showHistory());
     this.$('btn-entry-allfields').addEventListener('click', () => {
@@ -105,8 +111,15 @@ const Logbook = {
     });
     this.$('entry-form').addEventListener('input', e => {
       if (e.target.id === 'inp-tail_number') this.onTailInput();
+      this.clearWarnings();
     });
-    this.$('modal').addEventListener('click', e => { if (e.target.id === 'modal') App.closeModal('modal'); });
+    // Esc closes the panel, unless a dialog (history, import) is open on top of it.
+    // Capture phase so we see the overlays before App's handler hides them.
+    document.addEventListener('keydown', e => {
+      if (e.key !== 'Escape' || this.$('modal').hidden) return;
+      if (Array.from(document.querySelectorAll('.modal-overlay')).some(m => !m.hidden)) return;
+      this.closePanel();
+    }, true);
     this.$('btn-history-close').addEventListener('click', () => App.closeModal('history-modal'));
     this.$('history-modal').addEventListener('click', e => { if (e.target.id === 'history-modal') App.closeModal('history-modal'); });
   },
@@ -122,6 +135,12 @@ const Logbook = {
   toggleCol(key) {
     if (this.hiddenCols.indexOf(key) >= 0) this.hiddenCols = this.hiddenCols.filter(k => k !== key);
     else this.hiddenCols.push(key);
+    Data.setSetting('hiddenCols', this.hiddenCols.slice());
+    this.renderColPanel();
+    this.renderTable();
+  },
+  applyPreset(name) {
+    this.hiddenCols = presetHiddenCols(name);
     Data.setSetting('hiddenCols', this.hiddenCols.slice());
     this.renderColPanel();
     this.renderTable();
@@ -269,22 +288,21 @@ const Logbook = {
       const cls = (this.sortCol === f.key ? (this.sortDir === 'asc' ? 'sorted-asc' : 'sorted-desc') : '') + (f.type === 'num' ? ' num' : '');
       html += '<th class="' + cls + '" data-sort="' + f.key + '">' + escapeHtml(f.label) + '</th>';
     });
-    html += '<th data-sort="notes">Notes</th><th></th></tr></thead><tbody>';
+    html += '<th data-sort="notes">Notes</th></tr></thead><tbody>';
 
     rows.forEach((r, i) => {
-      html += '<tr data-id="' + escapeHtml(r.id) + '" title="Double-click to edit"><td class="num muted">' + (start + i + 1) + '</td>';
+      html += '<tr data-id="' + escapeHtml(r.id) + '"' + (r.id === this.editingId ? ' class="sel"' : '') + ' title="Click to open"><td class="num muted">' + (start + i + 1) + '</td>';
       visCols.forEach(f => {
         if (f.type === 'num') {
           const v = r[f.key];
           html += '<td class="num' + (v === 0 ? ' zero' : '') + '">' + fmtNum(v) + '</td>';
         } else {
-          html += '<td>' + escapeHtml(r[f.key]) + '</td>';
+          html += '<td class="col-' + f.key + '" title="' + escapeHtml(r[f.key]) + '">' + escapeHtml(r[f.key]) + '</td>';
         }
       });
       const notes = r.notes ? r.notes.substring(0, 30) + (r.notes.length > 30 ? '…' : '') : '';
       html += '<td class="notes-cell" title="' + escapeHtml(r.notes || '') + '">' + escapeHtml(notes) +
-        (r.source && r.source !== 'historical' ? '<span class="source-tag">' + escapeHtml(r.source) + '</span>' : '') + '</td>';
-      html += '<td><button class="btn btn-sm btn-secondary" data-edit="' + escapeHtml(r.id) + '">Edit</button></td></tr>';
+        (r.source && r.source !== 'historical' ? '<span class="source-tag">' + escapeHtml(r.source) + '</span>' : '') + '</td></tr>';
     });
     html += '</tbody>';
 
@@ -299,7 +317,7 @@ const Logbook = {
           h += '<td class="muted small">' + set.length + ' entries</td>';
         } else h += '<td></td>';
       });
-      return h + '<td></td><td></td></tr>';
+      return h + '<td></td></tr>';
     };
     html += '<tfoot>';
     if (this.perPage !== 'all' && data.length > per) html += totalsRow('Page', rows, 'page-totals');
@@ -321,21 +339,39 @@ const Logbook = {
     this.$('pagination-bottom').innerHTML = pag;
   },
 
+  // Plain-words description of what the Log Book filters currently select.
+  scopeLabel() {
+    const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    const y = this.$('f-year').value, m = this.$('f-month').value;
+    const df = this.$('f-date-from').value, dt = this.$('f-date-to').value;
+    const parts = [];
+    if (y && m) parts.push(MONTHS[parseInt(m, 10) - 1] + ' ' + y);
+    else if (y) parts.push(y);
+    else if (df || dt) parts.push((df || 'start') + ' to ' + (dt || 'today'));
+    ['f-aircraft', 'f-tail'].forEach(id => { if (this.$(id).value) parts.push(this.$(id).value); });
+    const cat = this.$('f-category');
+    if (cat.value) parts.push(cat.options[cat.selectedIndex].text);
+    if (this.$('f-search').value.trim()) parts.push('"' + this.$('f-search').value.trim() + '"');
+    return parts.length ? parts.join(' · ') : 'All flights';
+  },
+
   renderStats() {
     const d = App.state.filtered;
     const items = [
-      { key: 'total_time', label: 'Total Time', value: sumKey(d, 'total_time').toFixed(1), color: 'var(--accent2)' },
-      { key: 'pic', label: 'PIC', value: sumKey(d, 'pic').toFixed(1), color: 'var(--green)' },
-      { key: 'sic', label: 'SIC', value: sumKey(d, 'sic').toFixed(1), color: 'var(--orange)' },
-      { key: 'night', label: 'Night', value: sumKey(d, 'night').toFixed(1), color: 'var(--purple)' },
-      { key: 'cross_country', label: 'Cross Country', value: sumKey(d, 'cross_country').toFixed(1), color: 'var(--accent2)' },
-      { key: 'actual_inst', label: 'Act. Instrument', value: sumKey(d, 'actual_inst').toFixed(1), color: 'var(--orange)' },
-      { key: 'entries', label: 'Entries', value: d.length, color: 'var(--text)' },
-      { key: 'landings', label: 'Landings', value: (sumKey(d, 'day_landings') + sumKey(d, 'night_landings')).toFixed(0), color: 'var(--green)' }
+      { key: 'total_time', label: 'Total', value: sumKey(d, 'total_time').toFixed(1) },
+      { key: 'pic', label: 'PIC', value: sumKey(d, 'pic').toFixed(1) },
+      { key: 'sic', label: 'SIC', value: sumKey(d, 'sic').toFixed(1) },
+      { key: 'night', label: 'Night', value: sumKey(d, 'night').toFixed(1) },
+      { key: 'landings', label: 'Landings', value: (sumKey(d, 'day_landings') + sumKey(d, 'night_landings')).toFixed(0) },
+      { key: 'drops', label: 'Drops', value: sumKey(d, 'drops').toFixed(0) }
     ];
-    this.$('stats').innerHTML = items.map(i =>
-      '<div class="stat-card" id="stat-' + i.key + '" data-value="' + i.value + '"><div class="label">' + i.label + '</div><div class="value" style="color:' + i.color + '">' + Number(i.value).toLocaleString() + '</div></div>'
-    ).join('');
+    this.$('stats').innerHTML =
+      '<div class="scope" id="stat-entries" data-value="' + d.length + '" title="Totals follow the filters below">' +
+        '<div class="scope-what">' + escapeHtml(this.scopeLabel()) + '</div>' +
+        '<div class="scope-count">' + d.length.toLocaleString() + ' flights</div></div>' +
+      items.map(i =>
+        '<div class="stat" id="stat-' + i.key + '" data-value="' + i.value + '"><div class="label">' + i.label + '</div><div class="value">' + Number(i.value).toLocaleString() + '</div></div>'
+      ).join('');
   },
 
   // Pure: recency/currency figures from all entries as of `now`.
@@ -366,21 +402,25 @@ const Logbook = {
 
   renderCurrency() {
     const c = this.currency(App.state.all, new Date());
-    const item = (label, value, id) => '<div class="cur-item" id="cur-' + id + '" data-value="' + value + '"><div class="cur-label">' + label + '</div><div class="cur-value">' + value + '</div></div>';
+    // state: 'ok' / 'warn' pills against the 61.57 counts (3 landings, 6 approaches); 'info' for hours
+    const pill = (id, text, value, state, tip) => '<span class="pill pill-' + state + '" id="cur-' + id + '" data-value="' + value + '" title="' + tip + '">' + text + '</span>';
+    const need = (n, min) => n >= min ? 'ok' : 'warn';
     this.$('currency').innerHTML =
-      '<div class="cur-title">Currency (as of today, all entries)</div>' +
-      item('Ldg 90d day / night', c.dayLandings90 + ' / ' + c.nightLandings90, 'ldg90') +
-      item('Night ldg 90d', c.nightLandings90, 'nldg90') +
-      item('Appr 6 mo', c.approaches6mo, 'appr6') +
-      item('Hrs 12 mo', c.hours12mo.toFixed(1), 'hrs12') +
-      item('Hrs 90d', c.hours90d.toFixed(1), 'hrs90') +
-      item('Hrs 30d', c.hours30d.toFixed(1), 'hrs30');
+      '<span class="cur-title" title="Always counted over every flight, ignoring the filters">Currency · all flights</span>' +
+      pill('ldg90', 'Ldg 90d ' + c.landings90, c.landings90, need(c.landings90, 3), 'Landings in the last 90 days: ' + c.dayLandings90 + ' day, ' + c.nightLandings90 + ' night (3 needed)') +
+      pill('nldg90', 'Night ldg 90d ' + c.nightLandings90, c.nightLandings90, need(c.nightLandings90, 3), 'Night landings in the last 90 days (3 needed for night passengers)') +
+      pill('appr6', 'Appr 6 mo ' + c.approaches6mo, c.approaches6mo, need(c.approaches6mo, 6), 'Instrument approaches in the last 6 months (6 needed)') +
+      pill('hrs30', '30d ' + c.hours30d.toFixed(1), c.hours30d.toFixed(1), 'info', 'Hours in the last 30 days') +
+      pill('hrs90', '90d ' + c.hours90d.toFixed(1), c.hours90d.toFixed(1), 'info', 'Hours in the last 90 days') +
+      pill('hrs12', '12 mo ' + c.hours12mo.toFixed(1), c.hours12mo.toFixed(1), 'info', 'Hours in the last 12 months');
   },
 
-  // ---- entry modal -------------------------------------------------------
-  formFieldList() {
-    const nums = this.showAllFields ? NUM_FIELDS : NUM_FIELDS.filter(f => this.isColVisible(f.key));
-    return nums;
+  // ---- entry panel -------------------------------------------------------
+  // Number fields outside FORM_SECTIONS, shown under "More fields" when
+  // toggled on, or individually whenever the entry already has a value there.
+  extraFields(values) {
+    const inSections = [].concat(...FORM_SECTIONS.map(s => s.keys));
+    return NUM_FIELDS.filter(f => inSections.indexOf(f.key) < 0 && (this.showAllFields || values[f.key]));
   },
 
   buildForm(values) {
@@ -388,18 +428,95 @@ const Logbook = {
     const tails = [...new Set(App.state.all.map(r => r.tail_number).filter(Boolean))].sort();
     const val = k => escapeHtml(values[k] === undefined || values[k] === null ? '' : values[k]);
     const numVal = k => (values[k] ? escapeHtml(values[k]) : '');
-    let html = '';
-    html += '<div class="form-group"><label>Date</label><input type="date" id="inp-date" value="' + val('date') + '" required></div>';
-    html += '<div class="form-group"><label>Tail #</label><input type="text" id="inp-tail_number" list="tail-list" value="' + val('tail_number') + '"><datalist id="tail-list">' + tails.map(t => '<option value="' + escapeHtml(t) + '">').join('') + '</datalist></div>';
-    html += '<div class="form-group"><label>Aircraft <span class="hint">(auto from Tail #)</span></label><input type="text" id="inp-aircraft" value="' + val('aircraft') + '"></div>';
-    html += '<div class="form-group"><label>From</label><input type="text" id="inp-route_from" value="' + val('route_from') + '"></div>';
-    html += '<div class="form-group"><label>To</label><input type="text" id="inp-route_to" value="' + val('route_to') + '"></div>';
-    this.formFieldList().forEach(f => {
-      html += '<div class="form-group"><label>' + escapeHtml(f.label) + '</label><input type="text" id="inp-' + f.key + '" inputmode="decimal" value="' + numVal(f.key) + '"></div>';
+    const numInput = f => '<div class="form-group"><label for="inp-' + f.key + '">' + escapeHtml(f.label) + '</label><input type="text" id="inp-' + f.key + '" inputmode="decimal" value="' + numVal(f.key) + '"></div>';
+    const section = (title, inner, cls) => '<div class="form-section"><div class="form-section-title">' + title + '</div><div class="form-grid ' + (cls || '') + '">' + inner + '</div></div>';
+
+    let flight = '';
+    flight += '<div class="form-group span2"><label for="inp-date">Date</label><input type="date" id="inp-date" value="' + val('date') + '" required></div>';
+    flight += '<div class="form-group"><label for="inp-tail_number">Tail #</label><input type="text" id="inp-tail_number" list="tail-list" value="' + val('tail_number') + '"><datalist id="tail-list">' + tails.map(t => '<option value="' + escapeHtml(t) + '">').join('') + '</datalist></div>';
+    flight += '<div class="form-group"><label for="inp-aircraft">Aircraft <span class="hint">(from tail)</span></label><input type="text" id="inp-aircraft" value="' + val('aircraft') + '"></div>';
+    flight += '<div class="form-group"><label for="inp-route_from">From</label><input type="text" id="inp-route_from" value="' + val('route_from') + '"></div>';
+    flight += '<div class="form-group"><label for="inp-route_to">To</label><input type="text" id="inp-route_to" value="' + val('route_to') + '"></div>';
+    let html = section('Flight', flight);
+    FORM_SECTIONS.forEach(s => {
+      html += section(s.title, s.keys.map(k => numInput(NUM_FIELDS.find(f => f.key === k))).join(''));
     });
-    html += '<div class="form-group span-all"><label>Notes</label><textarea id="inp-notes">' + val('notes') + '</textarea></div>';
+    const extra = this.extraFields(values);
+    if (extra.length) html += section(this.showAllFields ? 'More fields' : 'Other fields with values', extra.map(numInput).join(''));
+    html += '<div class="form-section"><div class="form-group"><label for="inp-notes">Notes</label><textarea id="inp-notes">' + val('notes') + '</textarea></div></div>';
     this.$('entry-form').innerHTML = html;
-    this.$('btn-entry-allfields').textContent = this.showAllFields ? 'Show visible fields only' : 'Show all fields';
+    this.$('btn-entry-allfields').textContent = this.showAllFields ? 'Fewer fields' : 'More fields';
+    this.clearWarnings();
+  },
+
+  showPanel(title, meta, editing) {
+    this.$('modal-title').textContent = title;
+    this.$('entry-meta').textContent = meta;
+    this.$('btn-entry-delete').hidden = !editing;
+    this.$('btn-entry-history').hidden = !editing;
+    this.$('entry-quick').hidden = !editing;
+    App.openModal('modal');
+    this.markSelected();
+    this.$('inp-date').focus();
+  },
+
+  closePanel() {
+    App.closeModal('modal');
+    this.editingId = null;
+    this.seed = null;
+    this.markSelected();
+  },
+
+  markSelected() {
+    this.$('table-wrap').querySelectorAll('tr.sel').forEach(tr => tr.classList.remove('sel'));
+    if (!this.editingId || this.$('modal').hidden) return;
+    const tr = this.$('table-wrap').querySelector('tr[data-id="' + CSS.escape(this.editingId) + '"]');
+    if (tr) tr.classList.add('sel');
+  },
+
+  // New entry continuing from the open one: same day and aircraft, departing
+  // from where that one landed.
+  nextLeg() {
+    const r = this.editingId && Data.get(this.editingId);
+    if (!r) return;
+    this.openAdd({ date: r.date, tail_number: r.tail_number, aircraft: r.aircraft, route_from: r.route_to }, 'Next leg');
+    this.$('inp-route_to').focus();
+  },
+
+  duplicate() {
+    const r = this.editingId && Data.get(this.editingId);
+    if (!r) return;
+    this.openAdd(normalizeFields(r), 'Duplicate of ' + r.date);
+  },
+
+  // Non-blocking sanity checks; returns a list of messages.
+  checkEntry(r) {
+    const w = [];
+    const t = r.total_time || 0, eps = 0.05;
+    const today = ymd(new Date());
+    if (r.date > today) w.push('Date is in the future.');
+    if (t > 24) w.push('Total time is over 24 hours.');
+    if ((r.pic || 0) + (r.sic || 0) > t + eps) w.push('PIC + SIC (' + fmtNum((r.pic || 0) + (r.sic || 0)) + ') is more than total time (' + fmtNum(t) + ').');
+    ['multi_engine', 'single_engine', 'jet', 'turbo_prop', 'cross_country', 'night', 'actual_inst', 'over_12500', 'b737_total', 'c130_total', 'bae146_total']
+      .forEach(k => { if ((r[k] || 0) > t + eps) w.push(FIELD_LABEL[k] + ' (' + fmtNum(r[k]) + ') is more than total time.'); });
+    if ((r.b737_pic || 0) > (r.b737_total || 0) + eps) w.push('B737 PIC is more than B737 Total.');
+    if ((r.c130_pic || 0) > (r.c130_total || 0) + eps) w.push('C130 PIC is more than C130 Total.');
+    return w;
+  },
+
+  showWarnings(list) {
+    const el = this.$('entry-warn');
+    el.innerHTML = '<b>Check before saving:</b><ul>' + list.map(m => '<li>' + escapeHtml(m) + '</li>').join('') + '</ul><div class="small">Fix the numbers, or press Save again to keep them as they are.</div>';
+    el.hidden = false;
+    this.$('btn-entry-save').textContent = 'Save anyway';
+    this.warned = true;
+  },
+
+  clearWarnings() {
+    if (!this.warned && this.$('entry-warn').hidden) return;
+    this.$('entry-warn').hidden = true;
+    this.$('btn-entry-save').textContent = 'Save';
+    this.warned = false;
   },
 
   readForm() {
@@ -412,28 +529,20 @@ const Logbook = {
     return r;
   },
 
-  openAdd() {
+  openAdd(seed, meta) {
     this.editingId = null;
-    this.$('modal-title').textContent = 'Add Entry';
-    this.$('entry-meta').textContent = '';
-    this.$('btn-entry-delete').hidden = true;
-    this.$('btn-entry-history').hidden = true;
-    this.buildForm({ date: ymd(new Date()) });
-    App.openModal('modal');
-    this.$('inp-date').focus();
+    this.seed = seed || null;
+    this.buildForm(seed || { date: ymd(new Date()) });
+    this.showPanel('Add Entry', meta || '', false);
   },
 
   openEdit(id) {
     const r = Data.get(id);
     if (!r) return;
     this.editingId = id;
-    this.$('modal-title').textContent = 'Edit Entry';
-    this.$('entry-meta').textContent = (r.source || '') + (r.updated_at ? ' · updated ' + new Date(r.updated_at).toLocaleString() : '');
-    this.$('btn-entry-delete').hidden = false;
-    this.$('btn-entry-history').hidden = false;
+    this.seed = null;
     this.buildForm(r);
-    App.openModal('modal');
-    this.$('inp-date').focus();
+    this.showPanel('Edit Entry', (r.source || '') + (r.updated_at ? ' · updated ' + new Date(r.updated_at).toLocaleString() : ''), true);
   },
 
   onTailInput() {
@@ -457,7 +566,11 @@ const Logbook = {
     if (this.editingId) {
       r = Object.assign({}, Data.get(this.editingId), form); // fields absent from the form keep their values
     } else {
-      r = Object.assign(normalizeFields({}), form);
+      r = Object.assign(normalizeFields(this.seed || {}), form); // a duplicate keeps fields not shown in the form
+    }
+    if (!this.warned) {
+      const warnings = this.checkEntry(r);
+      if (warnings.length) { this.showWarnings(warnings); return; }
     }
     const btn = this.$('btn-entry-save');
     btn.disabled = true;
@@ -465,7 +578,7 @@ const Logbook = {
       await this.rememberTail(r.tail_number, r.aircraft);
       if (this.editingId) { await Data.update(this.editingId, r); App.toast('Entry updated'); }
       else { await Data.add(r, 'manual'); App.toast('Entry added: ' + r.date + ' ' + r.tail_number + ' ' + fmtNum(r.total_time) + ' h'); }
-      App.closeModal('modal');
+      this.closePanel();
       App.refresh();
     } catch (e) {
       App.toast('Save failed: ' + e.message, 'error');
@@ -478,7 +591,7 @@ const Logbook = {
     if (!confirm('Delete entry: ' + r.date + ' | ' + r.tail_number + ' ' + r.aircraft + ' | ' + r.total_time + 'h?')) return;
     try {
       await Data.remove(this.editingId);
-      App.closeModal('modal');
+      this.closePanel();
       App.toast('Entry deleted');
       App.refresh();
     } catch (e) { App.toast('Delete failed: ' + e.message, 'error'); }

@@ -51,7 +51,7 @@
   <main id="main" hidden>
     <!-- ================= LOG BOOK ================= -->
     <section class="page active" id="page-logbook">
-      <div class="stats-row">
+      <div class="summary-strip">
         <div class="stats" id="stats"></div>
         <div class="currency" id="currency"></div>
       </div>
@@ -114,13 +114,49 @@
       </div>
 
       <div class="col-panel" id="col-panel" hidden>
+        <div class="inline wrap col-presets" id="col-presets">
+          <span class="small muted">Presets:</span>
+          <button class="btn btn-sm btn-secondary" data-preset="current">Current flying</button>
+          <button class="btn btn-sm btn-secondary" data-preset="all">Everything</button>
+          <button class="btn btn-sm btn-secondary" data-preset="historical">Historical types</button>
+        </div>
         <div class="col-grid" id="col-grid"></div>
-        <div class="inline small muted">Click a column to show or hide it. Choices are saved.</div>
+        <div class="inline small muted">Click a column to show or hide it. Choices are saved. Hidden columns are still stored and exported in JSON/XLSX.</div>
       </div>
 
-      <div class="pagination" id="pagination-top"></div>
-      <div class="table-wrap" id="table-wrap"></div>
-      <div class="pagination" id="pagination-bottom"></div>
+      <div class="lb-body">
+        <div class="lb-main">
+          <div class="pagination" id="pagination-top"></div>
+          <div class="table-wrap" id="table-wrap"></div>
+          <div class="pagination" id="pagination-bottom"></div>
+        </div>
+
+        <!-- Entry side panel (add / edit). Kept id="modal" so App.openModal/closeModal work. -->
+        <aside class="entry-panel" id="modal" hidden role="dialog" aria-labelledby="modal-title">
+          <div class="panel-head">
+            <h2 id="modal-title">Add Entry</h2>
+            <button class="btn btn-ghost btn-sm" id="btn-entry-close" title="Close (Esc)">&#10005;</button>
+          </div>
+          <div class="small muted" id="entry-meta"></div>
+          <div class="inline wrap panel-quick" id="entry-quick" hidden>
+            <button class="btn btn-sm btn-secondary" id="btn-entry-nextleg" title="New entry: same date and aircraft, departing from this entry's destination">&#8627; Next leg</button>
+            <button class="btn btn-sm btn-secondary" id="btn-entry-dup" title="New entry with every field copied from this one">&#10697; Duplicate</button>
+            <button class="btn btn-sm btn-secondary" id="btn-entry-history">History</button>
+          </div>
+          <form id="entry-form-el" autocomplete="off">
+            <div class="entry-form" id="entry-form"></div>
+          </form>
+          <div class="entry-warn" id="entry-warn" hidden></div>
+          <div class="panel-actions">
+            <button class="btn btn-danger btn-sm" id="btn-entry-delete" hidden>Delete</button>
+            <button class="btn btn-ghost btn-sm" id="btn-entry-allfields">More fields</button>
+            <span class="spacer"></span>
+            <button class="btn btn-secondary btn-sm" id="btn-entry-cancel">Cancel</button>
+            <button class="btn btn-green" id="btn-entry-save">Save</button>
+          </div>
+          <div class="small muted panel-hint">Enter saves · Esc closes</div>
+        </aside>
+      </div>
     </section>
 
     <!-- ================= DASHBOARD ================= -->
@@ -253,31 +289,6 @@
       </div>
     </section>
   </main>
-</div>
-
-<!-- Entry modal -->
-<div class="modal-overlay" id="modal" hidden>
-  <div class="modal" role="dialog" aria-labelledby="modal-title">
-    <div class="modal-head">
-      <h2 id="modal-title">Add Entry</h2>
-      <span class="small muted" id="entry-meta"></span>
-    </div>
-    <form id="entry-form-el" autocomplete="off">
-      <div class="form-grid" id="entry-form"></div>
-    </form>
-    <div class="modal-actions space-between">
-      <div class="inline">
-        <button class="btn btn-danger btn-sm" id="btn-entry-delete" hidden>Delete</button>
-        <button class="btn btn-secondary btn-sm" id="btn-entry-history" hidden>History</button>
-        <button class="btn btn-ghost btn-sm" id="btn-entry-allfields">Show all fields</button>
-      </div>
-      <div class="inline">
-        <span class="small muted">Enter saves · Esc cancels</span>
-        <button class="btn btn-secondary" id="btn-entry-cancel">Cancel</button>
-        <button class="btn btn-green" id="btn-entry-save">Save Entry</button>
-      </div>
-    </div>
-  </div>
 </div>
 
 <!-- Import modal -->

@@ -94,9 +94,18 @@ frame.addEventListener('load', async () => {
     sel.value = '50'; sel.dispatchEvent(new W.Event('change', { bubbles: true }));
   });
 
+  await test('fresh setup uses the Current flying column preset; no Edit column', async () => {
+    eq(W.Logbook.hiddenCols, W.presetHiddenCols('current'));
+    const heads = Array.from(D.querySelectorAll('table.log thead th')).map(th => th.textContent);
+    eq(heads, ['#', 'Date', 'Tail #', 'Aircraft', 'From', 'To', 'Total Time', 'Night', 'Ngt Ldg', 'Day Ldg', 'PIC', 'SIC', 'Drops', 'Notes']);
+    ok(!D.querySelector('button[data-edit]'), 'no Edit buttons');
+  });
+
   await test('column visibility toggles and persists in settings', async () => {
     $('btn-columns').click();
     ok(!$('col-panel').hidden, 'panel open');
+    D.querySelector('#col-presets button[data-preset="all"]').click();
+    eq(W.Logbook.hiddenCols, []);
     D.querySelector('.col-toggle[data-key="jet"]').click();
     ok(!D.querySelector('th[data-sort="jet"]'), 'jet column hidden');
     await sleep(50);
@@ -105,6 +114,9 @@ frame.addEventListener('load', async () => {
     eq(ov.settings.hiddenCols, ['jet']);
     D.querySelector('.col-toggle[data-key="jet"]').click();
     ok(D.querySelector('th[data-sort="jet"]'), 'jet column back');
+    D.querySelector('#col-presets button[data-preset="current"]').click();
+    ok(!D.querySelector('th[data-sort="jet"]'), 'preset hides jet again');
+    eq(W.Data.getSetting('hiddenCols'), W.presetHiddenCols('current'));
   });
 
   let newId = null;
@@ -133,9 +145,11 @@ frame.addEventListener('load', async () => {
     near(parseFloat(stat('total_time')), 9126.3);
   });
 
-  await test('edit entry via row Edit button, hidden fields preserved', async () => {
-    D.querySelector('button[data-edit="' + newId + '"]').click();
-    ok(!$('modal').hidden, 'modal open'); eq($('modal-title').textContent, 'Edit Entry');
+  await test('edit entry with one click on the row, hidden fields preserved', async () => {
+    D.querySelector('tr[data-id="' + newId + '"] td:nth-child(4)').click();
+    ok(!$('modal').hidden, 'panel open'); eq($('modal-title').textContent, 'Edit Entry');
+    ok(D.querySelector('tr[data-id="' + newId + '"]').classList.contains('sel'), 'row highlighted');
+    ok($('table-wrap').offsetWidth > 0, 'table still visible beside the panel');
     eq($('inp-total_time').value, '2.2');
     setVal('inp-total_time', '2.5');
     $('btn-entry-save').click();
@@ -146,23 +160,92 @@ frame.addEventListener('load', async () => {
     eq(h.map(x => x.action), ['create', 'update']);
   });
 
-  await test('history modal lists the change', async () => {
-    D.querySelector('button[data-edit="' + newId + '"]').click();
+  await test('history modal lists the change; Esc closes history before the panel', async () => {
+    D.querySelector('tr[data-id="' + newId + '"]').click();
     $('btn-entry-history').click();
     await waitFor(() => $('history-body').textContent.includes('update'));
     ok($('history-body').textContent.includes('2.5'), 'shows new value');
-    $('btn-history-close').click(); $('btn-entry-cancel').click();
+    D.dispatchEvent(new W.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    ok($('history-modal').hidden, 'history closed'); ok(!$('modal').hidden, 'panel still open');
+    $('btn-entry-cancel').click();
     ok($('modal').hidden, 'closed');
   });
 
-  await test('delete entry (soft) via modal', async () => {
+  await test('next leg: same date and tail, departs from last destination', async () => {
+    D.querySelector('tr[data-id="' + newId + '"]').click();
+    $('btn-entry-nextleg').click();
+    eq($('modal-title').textContent, 'Add Entry');
+    eq($('inp-date').value, '2026-09-12'); eq($('inp-tail_number').value, 'T-133'); eq($('inp-aircraft').value, 'LC-130');
+    eq($('inp-route_from').value, 'KBOI'); eq($('inp-route_to').value, ''); eq($('inp-total_time').value, '');
+    eq(D.activeElement.id, 'inp-route_to');
+    $('btn-entry-cancel').click();
+    eq(W.App.state.all.length, 1612, 'nothing saved');
+  });
+
+  await test('duplicate copies every field into a new entry', async () => {
+    D.querySelector('tr[data-id="' + newId + '"]').click();
+    $('btn-entry-dup').click();
+    eq($('modal-title').textContent, 'Add Entry');
+    eq($('inp-total_time').value, '2.5'); eq($('inp-pic').value, '2.2'); eq($('inp-notes').value, 'UI test entry');
+    ok($('btn-entry-delete').hidden, 'no delete on a new entry');
+    $('btn-entry-cancel').click();
+  });
+
+  await test('form sections: fields with values always show; More fields reveals the rest', async () => {
+    const bae = W.App.state.all.find(r => r.bae146_total > 0);
+    W.Logbook.openEdit(bae.id);
+    ok($('inp-bae146_total'), 'historical BAe146 value visible without More fields');
+    ok(!$('inp-citation') || bae.citation, 'empty extras stay hidden');
+    W.Logbook.closePanel();
+    $('btn-add').click();
+    ok(!$('inp-p2_pic'), 'P2 hidden on a new entry');
+    $('btn-entry-allfields').click();
+    ok($('inp-p2_pic') && $('inp-single_engine'), 'More fields shows them');
+    $('btn-entry-allfields').click();
+    $('btn-entry-cancel').click();
+  });
+
+  await test('delete entry (soft) via panel', async () => {
     W.confirm = () => true;
-    D.querySelector('button[data-edit="' + newId + '"]').click();
+    D.querySelector('tr[data-id="' + newId + '"]').click();
     $('btn-entry-delete').click();
     await waitFor(() => $('modal').hidden);
     eq(W.App.state.all.length, 1611);
     ok(W.Data.get(newId).deleted_at, 'soft deleted');
     eq(stat('total_time'), '9124.1');
+  });
+
+  await test('save checks: PIC over total warns once, second Save keeps it', async () => {
+    $('btn-add').click();
+    setVal('inp-date', '2026-09-11'); setVal('inp-tail_number', 'T-133');
+    setVal('inp-total_time', '1.0'); setVal('inp-pic', '2.0'); setVal('inp-notes', 'check test');
+    $('btn-entry-save').click();
+    await sleep(50);
+    ok(!$('entry-warn').hidden, 'warning shown'); ok($('entry-warn').textContent.includes('PIC + SIC'), 'names the problem');
+    eq($('btn-entry-save').textContent, 'Save anyway');
+    eq(W.App.state.all.length, 1611, 'not saved yet');
+    setVal('inp-pic', '1.0');
+    ok($('entry-warn').hidden, 'editing clears the warning');
+    setVal('inp-pic', '2.0');
+    $('btn-entry-save').click(); await sleep(50);
+    ok(!$('entry-warn').hidden, 'warns again after an edit');
+    $('btn-entry-save').click();
+    await waitFor(() => $('modal').hidden);
+    const e = W.App.state.all.find(r => r.notes === 'check test');
+    ok(e, 'saved'); near(e.pic, 2.0);
+    W.Logbook.openEdit(e.id); $('btn-entry-delete').click();
+    await waitFor(() => $('modal').hidden);
+    eq(W.App.state.all.length, 1611); eq(stat('total_time'), '9124.1');
+  });
+
+  await test('summary strip names the filter scope; currency pills use all flights', async () => {
+    eq($('stats').querySelector('.scope-what').textContent, 'All flights');
+    setVal('f-year', '2026'); setVal('f-month', '08');
+    eq($('stats').querySelector('.scope-what').textContent, 'Aug 2026');
+    ok(D.querySelector('#cur-ldg90.pill'), 'landing pill');
+    const before = $('cur-hrs12').dataset.value;
+    $('btn-clear').click();
+    eq($('cur-hrs12').dataset.value, before, 'currency ignores filters');
   });
 
   await test('import: preview flags the existing 2026-09-07 day and imports the rest', async () => {

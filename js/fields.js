@@ -36,6 +36,28 @@ const FIELDS = [
   {key:'notes',label:'Notes',type:'textarea',hideable:false}
 ];
 const NUM_FIELDS = FIELDS.filter(f => f.type === 'num');
+
+// Entry panel layout. The form no longer follows table column visibility:
+// these sections always show; every other number field sits behind
+// "More fields" unless the entry already has a value in it.
+const FORM_SECTIONS = [
+  { title: 'Time', keys: ['total_time', 'pic', 'sic', 'multi_engine', 'jet', 'turbo_prop', 'cross_country', 'over_12500', 'night'] },
+  { title: 'Type', keys: ['b737_total', 'b737_pic', 'c130_total', 'c130_pic'] },
+  { title: 'Landings & ops', keys: ['day_landings', 'night_landings', 'drops', 'approaches', 'actual_inst', 'sim_inst'] }
+];
+
+// Column presets for the Log Book table: the keys listed are shown, every
+// other hideable column is hidden. 'current' is the default for a fresh setup.
+const COLUMN_PRESETS = {
+  current: { label: 'Current flying', show: ['pic', 'sic', 'night', 'day_landings', 'night_landings', 'drops'] },
+  all: { label: 'Everything', show: null },
+  historical: { label: 'Historical types', show: ['pic', 'sic', 'c130_total', 'b737_total', 'bae146_pic', 'bae146_total', 'citation', 'p2_pic', 'p2_sic'] }
+};
+function presetHiddenCols(name) {
+  const p = COLUMN_PRESETS[name];
+  if (!p || !p.show) return [];
+  return FIELDS.filter(f => f.hideable && p.show.indexOf(f.key) < 0).map(f => f.key);
+}
 const FIELD_KEYS = FIELDS.map(f => f.key);
 const FIELD_LABEL = {};
 FIELDS.forEach(f => { FIELD_LABEL[f.key] = f.label; });
