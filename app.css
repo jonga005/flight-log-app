@@ -251,9 +251,101 @@ td.col-route_from, td.col-route_to { max-width: 150px; overflow: hidden; text-ov
 .toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); background: var(--text); color: var(--bg); padding: 10px 18px; border-radius: 8px; z-index: 200; font-size: 0.85rem; box-shadow: 0 6px 20px rgba(0,0,0,0.3); }
 .toast.err { background: var(--red); color: #fff; }
 
+.mobile-dock { display: none; }
+
 @media (max-width: 1100px) {
   .charts-grid { grid-template-columns: 1fr; }
   .entry-panel { width: 340px; }
+}
+
+/* ---- iPad portrait and smaller: the entry panel becomes a full-height sheet ---- */
+@media (max-width: 1024px) {
+  .entry-panel {
+    position: fixed; top: 0; right: 0; bottom: 0; z-index: 150; width: min(480px, 100%);
+    border-radius: 0; border-width: 0 0 0 1px; box-shadow: -8px 0 30px rgba(0,0,0,0.25);
+    padding: calc(12px + env(safe-area-inset-top, 0px)) calc(14px + env(safe-area-inset-right, 0px)) calc(12px + env(safe-area-inset-bottom, 0px)) 14px;
+  }
+  .panel-actions { position: sticky; bottom: calc(-12px - env(safe-area-inset-bottom, 0px)); background: var(--surface); padding-bottom: 8px; }
+  .panel-hint { display: none; }
+  /* bigger touch targets; 16px text stops iOS zooming into a box */
+  .entry-form input, .entry-form textarea, .toolbar select, .toolbar input { font-size: 16px; min-height: 40px; }
+  .role-toggle button { min-height: 40px; font-size: 0.9rem; }
+  .panel-actions .btn, .panel-quick .btn { min-height: 40px; }
+  .topbar-actions #user-email, .topbar-actions #data-mode { display: none; }
+  /* fit the Current flying columns in iPad portrait */
+  table.log td, table.log thead th { padding: 6px 5px; }
+  td.col-route_from, td.col-route_to { max-width: 96px; }
+  td.notes-cell { max-width: 130px; }
+  td.col-tail_number, td.col-aircraft { max-width: 64px; overflow: hidden; text-overflow: ellipsis; }
+}
+
+/* ---- phone ---- */
+@media (max-width: 640px) {
+  html, body { height: auto; }  /* let the window scroll (not body) so iOS toolbars collapse */
+  body { overflow: visible; }
+  .app { height: auto; min-height: 100%; padding: 6px max(10px, env(safe-area-inset-right, 0px)) calc(84px + env(safe-area-inset-bottom, 0px)) max(10px, env(safe-area-inset-left, 0px)); }
+  main, .page.active, .page.scroll.active { overflow: visible; min-height: 0; }
+  .topbar { gap: 8px; }
+  .tabs { order: 3; width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .tab { padding: 8px 12px; flex-shrink: 0; }
+  .topbar-actions { margin-left: auto; }
+
+  /* summary strip: totals wrap, currency pills on their own lines */
+  .summary-strip { padding: 8px 10px; gap: 8px; }
+  .stats { gap: 6px 16px; }
+  .stats .scope { width: 100%; border-right: none; padding-right: 0; display: flex; justify-content: space-between; align-items: baseline; }
+  .stat .value { font-size: 1rem; }
+  .currency { margin-left: 0; }
+  .currency .cur-title { width: 100%; }
+
+  /* toolbar: period + search; the rest under More filters / the ⋯ menu */
+  .toolbar { padding: 8px; }
+  .toolbar #f-category, .toolbar #btn-add, .toolbar .spacer { display: none; }
+  .toolbar #f-aircraft { max-width: none; flex: 1; }
+  .toolbar #f-search { order: 5; flex: 1 1 100%; }
+  .nav-group { flex: 1 1 100%; }
+  .nav-group select { flex: 1; width: auto; }
+  .more-filters label { flex: 1 1 100%; }
+  .more-filters input, .more-filters select { flex: 1; }
+
+  /* the table turns into a list of cards: route + hours on top, date / tail / type below */
+  .lb-body, .lb-main { display: block; }
+  .table-wrap { overflow: visible; border: none; background: transparent; box-shadow: none; }
+  table.log, table.log tbody { display: block; }
+  table.log thead, table.log tfoot { display: none; }
+  table.log th:nth-child(n), table.log td:nth-child(n) { position: static; min-width: 0; }  /* undo the pinned desktop columns */
+  table.log tbody tr { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; padding: 10px 12px; background: var(--surface); border-bottom: 1px solid var(--border); }
+  table.log tbody tr::after { content: ""; flex-basis: 100%; order: 2; }
+  table.log tbody td { display: none; padding: 0; border: none; background: none !important; box-shadow: none !important; }
+  table.log tbody tr:hover td { background: none; }
+  table.log td.col-route_from, table.log td.col-route_to { display: block; order: 1; font-weight: 600; font-size: 1rem; max-width: 62%; }
+  table.log td.col-route_to:not(:empty)::before { content: "\2192\00a0"; color: var(--text2); font-weight: 400; }
+  table.log td.col-total_time { display: block; order: 1; margin-left: auto; font-size: 1.05rem; font-weight: 700; }
+  table.log td.col-date, table.log td.col-tail_number, table.log td.col-aircraft { display: block; order: 3; color: var(--text2); font-size: 0.82rem; }
+  table.log td.notes-cell { display: block; order: 4; flex-basis: 100%; max-width: none; color: var(--text2); font-size: 0.82rem; white-space: normal; }
+  table.log td.notes-cell:empty { display: none; }
+  table.log tbody tr.sel { background: rgba(37,99,235,0.10); box-shadow: inset 3px 0 0 var(--accent); }
+  table.log tbody tr.month-row { position: sticky; top: 0; z-index: 5; background: var(--surface2); padding: 8px 12px; border-bottom: 1px solid var(--border); }
+  table.log tbody tr.month-row::after { display: none; }
+  table.log tbody tr.month-row td.month-label, table.log tbody tr.month-row td.col-total_time { display: block; order: 1; }
+  .pagination { padding: 6px 2px; }
+
+  /* entry sheet fills the screen */
+  .entry-panel { width: 100%; border-left: none; box-shadow: none; }
+  .entry-form .form-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .entry-form .form-section-title .hint { display: block; margin: 2px 0 0; }
+
+  .mobile-dock {
+    display: flex; gap: 10px; position: fixed; left: 0; right: 0; bottom: 0; z-index: 120;
+    padding: 10px max(12px, env(safe-area-inset-right, 0px)) calc(10px + env(safe-area-inset-bottom, 0px)) max(12px, env(safe-area-inset-left, 0px));
+    background: var(--surface); border-top: 1px solid var(--border); box-shadow: 0 -4px 16px rgba(0,0,0,0.08);
+  }
+  .mobile-dock .btn { flex: 1; min-height: 48px; font-size: 1rem; }
+  body.panel-open .mobile-dock, .page:not(.active) .mobile-dock { display: none; }
+  body.panel-open { overflow: hidden; }
+
+  .modal { width: 100%; max-height: 92vh; padding: 16px; }
+  .charts-grid, .summary-grid { grid-template-columns: 1fr; }
 }
 @media print {
   body { overflow: visible; }

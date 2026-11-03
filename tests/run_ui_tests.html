@@ -432,6 +432,71 @@ frame.addEventListener('load', async () => {
     ok(W.location.search.includes('tab=logbook'), 'url has tab');
   });
 
+  // ---- phone and iPad widths (the iframe is resized; the app's media queries follow it)
+  const css = (el, p) => W.getComputedStyle(el)[p];
+  const resize = async (w, h) => { frame.style.width = w + 'px'; frame.style.height = h + 'px'; await sleep(250); };
+
+  await test('iPad portrait (820px): entry panel is a full-height sheet over the list', async () => {
+    await resize(820, 1180);
+    W.App.showTab('logbook');
+    ok(css(D.querySelector('table.log thead'), 'display') !== 'none', 'still a table on iPad');
+    W.Logbook.openEdit(W.App.state.filtered[0].id);
+    eq(css($('modal'), 'position'), 'fixed');
+    ok($('modal').getBoundingClientRect().height >= 1170, 'full height');
+    ok(css($('inp-total_time'), 'font-size') === '16px', '16px inputs (no iOS zoom)');
+    W.Logbook.closePanel();
+  });
+
+  await test('phone (390px): cards instead of a table, docked New / Next leg buttons', async () => {
+    await resize(390, 844);
+    eq(css(D.querySelector('table.log thead'), 'display'), 'none', 'header hidden');
+    const row = D.querySelector('tbody tr[data-id]');
+    eq(css(row, 'display'), 'flex', 'row is a card');
+    ok(css(row.querySelector('.col-route_from'), 'display') !== 'none', 'route shown');
+    ok(css(row.querySelector('.col-total_time'), 'display') !== 'none', 'hours shown');
+    ok(!row.querySelector('.col-pic') || css(row.querySelector('.col-pic'), 'display') === 'none', 'detail columns hidden');
+    ok(D.documentElement.scrollWidth <= 391, 'no sideways scroll: ' + D.documentElement.scrollWidth);
+    ok(css($('mobile-dock'), 'display') === 'flex', 'dock visible');
+    $('btn-dock-add').click();
+    ok(!$('modal').hidden, 'sheet open');
+    ok(Math.abs($('modal').getBoundingClientRect().width - 390) < 2, 'sheet fills the width');
+    eq(css($('mobile-dock'), 'display'), 'none', 'dock hidden under the sheet');
+    ok(D.activeElement.id !== 'inp-date', 'no keyboard popped on open');
+    setVal('inp-tail_number', 'T-137'); setVal('inp-total_time', '2.0');
+    eq($('inp-jet').value, '2', 'auto-fill works on the phone too');
+    $('btn-entry-cancel').click();
+    ok($('modal').hidden, 'closed');
+    eq(W.App.state.all.length, 1611, 'nothing saved');
+  });
+
+  await test('phone: Next leg in the dock starts from the latest flight', async () => {
+    const latest = W.App.state.all.reduce((a, r) => (!a || r.date > a.date ? r : a), null);
+    $('btn-dock-next').click();
+    eq($('inp-date').value, latest.date); eq($('inp-tail_number').value, latest.tail_number);
+    eq($('inp-route_from').value, latest.route_to || latest.route_from.split('-').pop());
+    $('btn-entry-cancel').click();
+  });
+
+  await test('phone: scrolling the page loads more cards; month headers stay', async () => {
+    W.scrollTo(0, D.documentElement.scrollHeight);
+    W.dispatchEvent(new W.Event('scroll'));
+    await sleep(50);
+    eq(D.querySelectorAll('tbody tr[data-id]').length, 400);
+    ok(css(D.querySelector('tbody tr.month-row'), 'display') === 'flex', 'month header visible');
+    W.scrollTo(0, 0);
+    await resize(1400, 700);
+    ok(css(D.querySelector('table.log thead'), 'display') !== 'none', 'desktop table back');
+  });
+
+  await test('home-screen install: manifest and icons are reachable', async () => {
+    const m = await (await fetch('../manifest.webmanifest')).json();
+    eq(m.display, 'standalone');
+    for (const ic of m.icons.concat([{ src: 'icons/apple-touch-icon.png' }])) {
+      const r = await fetch('../' + ic.src); ok(r.ok, ic.src);
+    }
+    ok(D.querySelector('link[rel="apple-touch-icon"]'), 'apple-touch-icon link');
+  });
+
   localStorage.removeItem('flightlog_dev_overlay');
   localStorage.removeItem('flightlog_theme');
   const passed = results.filter(r => r.ok).length, failed = results.length - passed;
