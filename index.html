@@ -2,9 +2,17 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>Flight Log</title>
-<link rel="icon" href="data:,">
+<!-- Add to Home Screen on iPhone / iPad -->
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Logbook">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="theme-color" content="#1d4ed8">
 <link rel="stylesheet" href="app.css">
 <script src="config.js"></script>
 <script src="config.local.js" onerror="void 0"></script>
@@ -149,6 +157,12 @@
           </div>
           <div class="small muted panel-hint">Enter saves · Esc closes</div>
         </aside>
+      </div>
+
+      <!-- Phone only: thumb-reach buttons docked at the bottom of the screen -->
+      <div class="mobile-dock" id="mobile-dock">
+        <button class="btn btn-secondary" id="btn-dock-next" title="Same date and aircraft as your latest flight, departing from where it landed">&#8627; Next leg</button>
+        <button class="btn btn-green" id="btn-dock-add">+ New flight</button>
       </div>
     </section>
 

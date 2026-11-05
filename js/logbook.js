@@ -74,6 +74,16 @@ const Logbook = {
       if (this.shown >= App.state.filtered.length) return;
       if (wrap.scrollTop + wrap.clientHeight > wrap.scrollHeight - 400) this.showMore();
     });
+    // on a phone the whole page scrolls instead of the table box
+    window.addEventListener('scroll', () => {
+      if (this.shown >= App.state.filtered.length || App.state.tab !== 'logbook') return;
+      if (window.innerHeight + window.scrollY > document.documentElement.scrollHeight - 600) this.showMore();
+    }, { passive: true });
+    this.$('btn-dock-add').addEventListener('click', () => this.openAdd());
+    this.$('btn-dock-next').addEventListener('click', () => {
+      const latest = App.state.all.reduce((a, r) => (!a || r.date > a.date ? r : a), null);
+      if (latest) this.nextLegFrom(latest); else this.openAdd();
+    });
     this.$('table-status').addEventListener('click', e => {
       if (e.target.closest('[data-show-all]')) { this.shown = App.state.filtered.length; this.renderTable(); }
     });
@@ -258,11 +268,16 @@ const Logbook = {
   },
 
   showMore() {
-    const wrap = this.$('table-wrap'), top = wrap.scrollTop;
+    const wrap = this.$('table-wrap'), top = wrap.scrollTop, pageTop = window.scrollY;
     this.shown += this.CHUNK;
     this.renderTable();
     wrap.scrollTop = top;
+    window.scrollTo(0, pageTop);
   },
+
+  // Phone / iPad portrait: the panel is a full-height sheet over the list.
+  isCompact() { return window.matchMedia && matchMedia('(max-width: 1024px)').matches; },
+  isPhone() { return window.matchMedia && matchMedia('(max-width: 640px)').matches; },
 
   renderTable() {
     const data = App.state.filtered;
@@ -280,10 +295,10 @@ const Logbook = {
     const monthRow = key => {
       const set = monthSets[key] || [];
       const label = /^\d{4}-\d{2}$/.test(key) ? MONTHS[parseInt(key.substring(5), 10) - 1] + ' ' + key.substring(0, 4) : key;
-      let h = '<tr class="month-row"><td></td><td colspan="' + lead + '">' + escapeHtml(label) + ' <span class="muted">· ' + set.length + (set.length === 1 ? ' flight' : ' flights') + '</span></td>';
+      let h = '<tr class="month-row"><td></td><td class="month-label" colspan="' + lead + '">' + escapeHtml(label) + ' <span class="muted">· ' + set.length + (set.length === 1 ? ' flight' : ' flights') + '</span></td>';
       visCols.slice(lead).forEach(f => {
         const s = f.type === 'num' ? sumKey(set, f.key) : 0;
-        h += '<td class="num">' + (s ? fmtNum(Math.round(s * 10) / 10) : '') + '</td>';
+        h += '<td class="num col-' + f.key + '">' + (s ? fmtNum(Math.round(s * 10) / 10) : '') + '</td>';
       });
       return h + '<td></td></tr>';
     };
@@ -303,7 +318,7 @@ const Logbook = {
       visCols.forEach(f => {
         if (f.type === 'num') {
           const v = r[f.key];
-          html += '<td class="num' + (v === 0 ? ' zero' : '') + '">' + fmtNum(v) + '</td>';
+          html += '<td class="num col-' + f.key + (v === 0 ? ' zero' : '') + '">' + fmtNum(v) + '</td>';
         } else {
           html += '<td class="col-' + f.key + '" title="' + escapeHtml(r[f.key]) + '">' + escapeHtml(r[f.key]) + '</td>';
         }
@@ -529,12 +544,15 @@ const Logbook = {
     this.$('btn-entry-history').hidden = !editing;
     this.$('entry-quick').hidden = !editing;
     App.openModal('modal');
+    document.body.classList.add('panel-open');
+    this.$('modal').scrollTop = 0;
     this.markSelected();
-    this.$('inp-date').focus();
+    if (!this.isPhone()) this.$('inp-date').focus(); // on a phone, don't pop the keyboard until a box is tapped
   },
 
   closePanel() {
     App.closeModal('modal');
+    document.body.classList.remove('panel-open');
     this.editingId = null;
     this.seed = null;
     this.markSelected();
@@ -551,9 +569,14 @@ const Logbook = {
   // from where that one landed.
   nextLeg() {
     const r = this.editingId && Data.get(this.editingId);
-    if (!r) return;
-    this.openAdd({ date: r.date, tail_number: r.tail_number, aircraft: r.aircraft, route_from: r.route_to }, 'Next leg');
-    this.$('inp-route_to').focus();
+    if (r) this.nextLegFrom(r);
+  },
+
+  nextLegFrom(r) {
+    // imported multi-leg days keep the whole route in From (e.g. KRDD-KMCC-KRDD): use its last airport
+    const landed = r.route_to || String(r.route_from || '').split('-').pop().trim();
+    this.openAdd({ date: r.date, tail_number: r.tail_number, aircraft: r.aircraft, route_from: landed }, 'Next leg after ' + r.date);
+    if (!this.isPhone()) this.$('inp-route_to').focus();
   },
 
   duplicate() {
